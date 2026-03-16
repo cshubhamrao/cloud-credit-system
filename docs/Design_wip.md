@@ -2,7 +2,7 @@
 
 **Architecture Design Document**
 
-_Version 0.3 — Draft_
+_Version 0.4 — Draft_
 
 ---
 
@@ -17,6 +17,20 @@ This document describes a resource accounting and quota enforcement system for a
 These two purposes frame the entire system. The Control Plane manages tenant **Workload Clusters**, tracking resource consumption via a double-entry ledger (TigerBeetle) and enforcing both hard and soft limits on sliceable resources.
 
 **Scale**: ~100 tenants × 1 heartbeat/10s × ~20 metrics each = **10 heartbeats/sec** → **~200 TigerBeetle transfers/sec**. This is far below Kafka's throughput sweet spot; **Temporal** provides the same durability guarantees with significantly less operational complexity at this scale.
+
+> **Metric cardinality note**: The "~20 metrics each" figure refers to the ~20 raw heartbeat fields the agent collects (e.g., `cpu_ms_delta`, `memory_mb_seconds_delta`, `active_nodes`, `active_users`, `storage_bytes`, GPU slices, etc.) — each becomes a billable TigerBeetle ledger write. The **Ledger Design** section below lists 7 ledgers as the current illustrative set; the ~20 ledger target is the full production scope. The **batch sizing table** uses 7 resources (consistent with the illustrative set): `3 hb × 7 resources = 21 transfers` per example. The exec-summary ~200 TB transfers/sec figure assumes the full ~20 ledger target. These numbers are consistent and deliberately document different points on the same scale curve.
+
+---
+
+## Non-Goals (v0.3 Scope)
+
+This design intentionally excludes the following. Each is a valid future concern but is out of scope for the current implementation:
+
+- **Multi-region deployment**: The system is designed as a single-region Control Plane. TigerBeetle cross-datacenter replication and cross-region quota consistency are not yet designed. See [Extensibility — Multi-Region](#multi-region) for options.
+- **Adversarial metering guarantees**: The system trusts agent-reported metrics. It cannot detect underreporting by a compromised agent. Anomaly detection via cloud-provider API spot-checks is an out-of-scope product decision. See [Open Question #10](#open-questions--decisions-needed).
+- **Sub-heartbeat billing granularity**: The finest billing granularity is one heartbeat interval (~10 seconds). Per-second or per-request metering is not addressed.
+- **Cross-tenant quota sharing**: Each tenant has an independent quota wallet. Shared pools across tenants are not supported.
+- **Real-time TigerBeetle query access from the dashboard**: The dashboard reads from PostgreSQL `quota_snapshots` only. Direct TB balance queries from external clients (dashboard, API consumers) are not exposed.
 
 ---
 
@@ -391,6 +405,54 @@ Transfer { ..., ledger: 3, code: 200, flags: 0 }             // Storage (last �
 | 400  | `NODE_ACTIVATE` — pending transfer for active node slot            |
 | 401  | `USER_ACTIVATE` — pending transfer for active user slot            |
 
+### Usage Correction Flow
+
+`USAGE_CORRECTION` (code 201) is the mechanism for correcting previously recorded usage after the fact.
+
+**When to use**:
+- Agent bug caused over- or under-reporting of usage
+- Metering subsystem failure (e.g., metrics-server outage caused missed deltas)
+- Billing dispute: tenant disputes a specific usage charge
+
+**Invariants**:
+- Can be **positive** (refund: operator→tenant_quota, credits the wallet back) or **negative** (missed usage: tenant_quota→sink, debits the wallet for uncharged usage)
+- Must be **linked to the original transfer** via `user_data_128` (set to the original transfer's ID)
+- Requires **Admin authority** — not Support. Support can issue ad-hoc positive credits (`QUOTA_ADJUSTMENT`, code 101); corrections that may be negative require Admin to prevent abuse.
+- Affects the **current billing period snapshot** — corrections within a period are reflected in `billing_snapshots` at period close
+
+**Transfer structure (positive correction — refund)**:
+```
+Transfer {
+  id:                hash(original_transfer_id, "correction", correction_ts),  // deterministic
+  debit_account_id:  <global_operator_account[ledger]>,
+  credit_account_id: <tenant_quota_account>,
+  amount:            <correction_amount>,
+  ledger:            <same ledger as original transfer>,
+  code:              201,                         // USAGE_CORRECTION
+  user_data_128:     <original_transfer_id>,      // links correction to original
+  user_data_64:      <correction_timestamp_ns>,
+}
+```
+
+For a **negative correction** (missed usage), reverse debit/credit direction: `tenant_quota_account → global_sink_account`.
+
+**Schema addition** — corrections are exposed as a separate line item in billing snapshots:
+```sql
+ALTER TABLE billing_snapshots ADD COLUMN correction_credits BIGINT NOT NULL DEFAULT 0;
+```
+
+**Billing report decomposition** (updated):
+```
+Base plan allocation:  SUM(amount) WHERE code = 100
+Surge pack credits:    SUM(amount) WHERE code = 102
+Manual credits:        SUM(amount) WHERE code = 101
+Corrections (net):     SUM(amount * sign) WHERE code = 201   -- positive = refund, negative = clawback
+Total consumed:        SUM(amount) WHERE code = 200
+Net available:         (100 total) + (102 total) + (101 total) + (201 net) - (200 total)
+```
+
+**Execution path**: `QuotaAdjustmentWorkflow` with `adjustment_type = USAGE_CORRECTION` and Admin role. Activity 1 validates the Admin role (Support role is rejected for code 201). The correction transfer is signaled to `TenantAccountingWorkflow` for single-writer TB semantics, identical to other adjustment flows.
+
 ### Querying Balances
 
 ```go
@@ -519,16 +581,21 @@ CREATE TABLE users (
   role            TEXT CHECK (role IN ('admin', 'support', 'viewer'))
 );
 
--- credit_adjustments: audit trail for manual credits issued by support
+-- credit_adjustments: audit trail for quota adjustments and usage corrections
 CREATE TABLE credit_adjustments (
-  id              UUID PRIMARY KEY,
-  tenant_id       UUID REFERENCES tenants(id),
-  resource_type   TEXT NOT NULL,
-  amount          BIGINT NOT NULL,
-  reason          TEXT,
-  issued_by       UUID REFERENCES users(id),
-  tb_transfer_id  BYTEA NOT NULL,   -- links to TigerBeetle transfer (code: 101)
-  created_at      TIMESTAMPTZ DEFAULT NOW()
+  id                  UUID PRIMARY KEY,
+  tenant_id           UUID REFERENCES tenants(id),
+  resource_type       TEXT NOT NULL,
+  amount              BIGINT NOT NULL,
+  reason              TEXT,
+  issued_by           UUID REFERENCES users(id),
+  approved_by         UUID REFERENCES users(id),          -- NULL until approved
+  tb_transfer_id      BYTEA,                              -- NULL while pending approval; set after TB write
+  status              TEXT CHECK (status IN ('approved', 'pending_approval', 'rejected')) DEFAULT 'approved',
+  approval_threshold  BIGINT,                             -- threshold that triggered four-eyes gate (NULL if below threshold)
+  requested_at        TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at         TIMESTAMPTZ,                        -- set on approve or reject
+  created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- plan_change_log: tracks base plan modifications and propagation status
@@ -1009,6 +1076,83 @@ TenantAccountingWorkflow(tenant_id):
     cur_batch = []
 ```
 
+### TenantAccountingWorkflow — Lifecycle State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initializing : workflow starts\n(fresh or ContinueAsNew)
+    Initializing --> Idle : init signal received\n(carryover state loaded)
+    Idle --> Batching : heartbeat or quota_adjustment signal\n(first item in new batch)
+    Batching --> Batching : additional signals accumulate
+    Batching --> Flushing : flush timer fires\nor max_batch_size reached
+    Flushing --> Idle : flush complete\nbatch cleared
+    Flushing --> ContinuingAsNew : flush complete\n+ event count ≥ 10,000
+    Idle --> ContinuingAsNew : event count ≥ 10,000\nwhile idle
+    Batching --> ContinuingAsNew : event count ≥ 10,000\n(forces flush before transition)
+    ContinuingAsNew --> [*] : workflow.ContinueAsNew()\nnew execution → Initializing
+    Idle --> Stopped : stop signal\n(from TenantDeregistrationWorkflow)
+    Batching --> Stopped : stop signal\n(drains batch first)
+    Stopped --> [*]
+```
+
+| State | Invariant |
+|---|---|
+| `Initializing` | Carryover state (`processed_seqs`, `cluster_status`, `flush_interval`) is being loaded; no signals processed yet |
+| `Idle` | `cur_batch` is empty; flush timer is armed; missed-HB timers are running per cluster |
+| `Batching` | `cur_batch` has ≥1 pending signal; flush timer is running; no TB activity in flight |
+| `Flushing` | TB and PG activities are in flight; new signals continue to accumulate in `cur_batch` (they will be processed in the next flush) |
+| `ContinuingAsNew` | Pre-CAN flush is complete; state is serialized into `CarryoverState`; `workflow.ContinueAsNew` is called |
+| `Stopped` | Workflow has drained its batch and exited cleanly; no further signals are processed |
+
+**Signal/timer transition table:**
+
+| Event | From state(s) | To state | Action |
+|---|---|---|---|
+| `heartbeat` signal | Idle, Batching | Batching | Append to `cur_batch`; reset missed-HB timer for cluster |
+| `quota_adjustment` signal | Idle, Batching | Flushing | Append to `cur_batch`; force immediate flush (don't wait for timer) |
+| `register_cluster` signal | Any live | — | Initialize `processed_seqs[cluster_id]=0`, `cluster_status[cluster_id]=healthy`; arm missed-HB timer |
+| `deregister_cluster` signal | Any live | — | Remove from `processed_seqs` and `cluster_status`; cancel missed-HB timer |
+| flush timer | Batching | Flushing | Begin TB+PG activity batch |
+| max_batch_size reached | Batching | Flushing | Safety cap: force flush regardless of timer |
+| flush complete | Flushing | Idle or ContinuingAsNew | Update `processed_seqs`, `last_tb_ack`; re-arm flush timer |
+| event count ≥ 10,000 | Idle, Batching, Flushing | ContinuingAsNew | Flush first (if needed); serialize CarryoverState; ContinueAsNew |
+| stop signal | Idle, Batching | Stopped | Drain batch; exit cleanly |
+
+---
+
+### Per-Cluster Status State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy : RegisterCluster signal
+    Healthy --> Degraded : 5 missed heartbeats (~50s)
+    Degraded --> Healthy : heartbeat received
+    Degraded --> Unreachable : 20 missed heartbeats (~3.3min)
+    Unreachable --> Healthy : heartbeat received
+    Unreachable --> Suspended : tier-dependent threshold\n(queues SHUTDOWN command)
+    Suspended --> Healthy : heartbeat received\n+ within quota\n+ SHUTDOWN reason = missed_hb\n(SHUTDOWN cancelled)
+    Suspended --> Suspended : heartbeat received\n+ quota_exhausted\n(SHUTDOWN enforced; cluster must upgrade)
+    Healthy --> [*] : DeregisterCluster signal
+    Degraded --> [*] : DeregisterCluster signal
+    Unreachable --> [*] : DeregisterCluster signal
+    Suspended --> [*] : DeregisterCluster signal
+```
+
+| Transition | Trigger | Actions |
+|---|---|---|
+| Healthy → Degraded | 5 missed HBs | Update `cluster_status`; emit structured log; dashboard warning |
+| Degraded → Healthy | Heartbeat received | Reset missed-HB timer; clear dashboard warning |
+| Degraded → Unreachable | 20 missed HBs | Update `cluster_status`; emit alert |
+| Unreachable → Healthy | Heartbeat received | Reset missed-HB timer; clear alert |
+| Unreachable → Suspended | Tier-dependent threshold | Update `cluster_status`; insert `SHUTDOWN` into `pending_commands` |
+| Suspended → Healthy | Heartbeat received + within quota + SHUTDOWN reason = `missed_hb` | Cancel SHUTDOWN: delete from `pending_commands`; restore status; re-arm timer |
+| Suspended → Suspended | Heartbeat received + `quota_exhausted` | SHUTDOWN stays; return `STATUS_QUOTA_EXCEEDED` in response |
+| Any → (removed) | DeregisterCluster signal | Remove from `processed_seqs` and `cluster_status`; cancel all timers; delete `pending_commands` |
+
+**Key reconnection invariant** (Distributed Systems Analysis #6): SHUTDOWN is cancelled on reconnect **only when** `reason = missed_hb`. If SHUTDOWN was issued for `quota_exhausted`, the cluster must upgrade its plan or purchase a surge pack — reconnecting does not clear the SHUTDOWN.
+
+---
+
 **Key design decisions:**
 
 - **Independent transfers (not linked) for usage recording**: Per [Distributed Systems Analysis — Linked batch all-or-nothing](#distributed-systems-analysis), one exhausted resource must not block accounting for healthy ones. Linking is reserved for billing reset (drain+re-credit must be atomic).
@@ -1078,12 +1222,42 @@ If any activity fails, Temporal retries with exponential backoff. TigerBeetle's 
 ```
 QuotaAdjustmentWorkflow:
   Input: (tenant_id, resource_type, adjustment_type, amount, issuer_id)
+
   Activity 1: Validate authorization (role check against users table)
-  Activity 2: Submit QUOTA_ADJUSTMENT (101) or SURGE_PACK_CREDIT (102) to TigerBeetle
-  Activity 3: Update quota_configs.burst_credits in PostgreSQL (surge packs)
-  Activity 4: Insert credit_adjustments audit record (user_data_128 = issuer_id)
-  Activity 5: Update quota_snapshots for dashboard
+              USAGE_CORRECTION (code 201) requires Admin — Support is rejected.
+              Support may issue QUOTA_ADJUSTMENT (code 101) with positive amounts only.
+
+  Activity 2: Check four-eyes threshold (from system_config / quota_configs)
+    If amount > threshold:
+      Insert credit_adjustments with status='pending_approval', tb_transfer_id=NULL
+      → Approval Gate
+    Else:
+      Insert credit_adjustments with status='approved'
+      → Skip to Activity 4
+
+  // --- Approval Gate (above-threshold only) ---
+  Activity 3: Wait for Temporal signal ("approve_adjustment" / "reject_adjustment")
+    Signal payload: { approver_id }
+    Validation: approver_id != issuer_id, approver has 'admin' role
+    Timeout: 72h → auto-reject
+
+    On approve: Update credit_adjustments status='approved', approved_by, resolved_at → Activity 4
+    On reject:  Update credit_adjustments status='rejected', approved_by, resolved_at → End (no TB transfer)
+
+  Activity 4: Signal TenantAccountingWorkflow with "quota_adjustment" signal
+              → TB write (QUOTA_ADJUSTMENT 101, SURGE_PACK_CREDIT 102, or USAGE_CORRECTION 201)
+                happens inside the tenant workflow with single-writer semantics;
+                quota_snapshots is updated there too.
+              → TenantAccountingWorkflow flushes immediately on adjustment signal (no 30s timer wait).
+
+  Activity 5: Update credit_adjustments.tb_transfer_id (set after TB write confirmed by TAW)
+
+  Activity 6: Update quota_configs.burst_credits in PostgreSQL (surge packs only; no-op for other types)
 ```
+
+**Why no direct TB write here**: Distributed Systems Analysis #8 establishes that all TB writes for a tenant must go through `TenantAccountingWorkflow` to prevent race conditions. `QuotaAdjustmentWorkflow` is the authorization and audit gate; the actual ledger write is delegated via signal. The `quota_snapshots` update also happens inside `TenantAccountingWorkflow` — no separate activity is needed here.
+
+**Four-eyes enforcement**: The approval gate (Activity 3) blocks the workflow until a second Admin approves or rejects, or the 72h timeout fires. During this window the adjustment is visible in `credit_adjustments` with `status='pending_approval'` and queryable via `ListPendingAdjustments`. The approver must be a different user than the issuer (`approver_id != issuer_id`). Auto-reject on timeout is treated as rejection — no TB transfer is submitted.
 
 ### Plan Change Propagation Workflow
 
@@ -1248,11 +1422,41 @@ func deriveTransferID(clusterID uuid.UUID, seqNum uint64, resourceType string) [
 
 ---
 
-## Backpressure
+## Backpressure & Overload Policy
 
-- If Temporal task queue depth exceeds threshold, the gateway returns `RESOURCE_EXHAUSTED` (gRPC status code) to workload clusters, instructing them to retry with exponential backoff
-- Temporal activities use circuit breakers for TigerBeetle and PostgreSQL connections
-- Workload clusters implement exponential backoff with jitter on any gateway error
+### Heartbeat Coalescing
+
+When the system is overloaded and multiple heartbeats from the same cluster are queued ahead of processing, only the **newest unprocessed heartbeat** matters for enforcement. Stale heartbeats are deduplicated by `processed_seqs[cluster_id]` — any signal with `seq ≤ last_processed_seq` is dropped immediately in the workflow signal handler, before any activity is scheduled. This means backlog buildup does not compound processing work: 10 queued signals for the same cluster cost the same as 1 (all but the newest are no-ops).
+
+### Priority Ordering
+
+Under load, the following processing priority applies (highest to lowest):
+
+1. **Command delivery** — SHUTDOWN/SCALE_DOWN commands are pushed over the bidi stream immediately when Temporal makes an enforcement decision; these are never batched or deferred.
+2. **Quota snapshot updates** — `update_quota_snapshots` activities run after each TB flush; slightly deferrable but must complete within the 10-20s staleness budget.
+3. **Heartbeat ACKs** — `ack_sequence` is pushed to clients when Temporal completes; may lag by up to `flush_interval` (max 120s) without correctness impact.
+4. **Metric ingestion (TB transfers)** — batched with 30–120s latency budget. Hard limit enforcement remains correct regardless of batch delay; soft-limit alerting may lag.
+
+### Queue Bounds
+
+- **Temporal task queue**: max depth is configurable per task queue. If exceeded, the gateway returns `RESOURCE_EXHAUSTED` (gRPC status 8) and the cluster backs off. The Temporal worker autoscaler (or operator) should be alerted when queue depth sustains above 80% of the limit.
+- **Gateway signal queue per cluster**: the gateway's in-memory pending-signal map is bounded. If a cluster's signal queue is full (cluster is signaling faster than Temporal is consuming), the gateway drops duplicate sequence numbers (already-seen seqs are no-ops) and applies backpressure via `RESOURCE_EXHAUSTED`.
+
+### Client Behavior Under Backpressure
+
+On receiving `RESOURCE_EXHAUSTED` from the gateway:
+
+1. Cluster agent applies **exponential backoff with full jitter**: initial delay 1s, max 30s, multiplier 2.
+2. Cluster operates on its **locally cached quota** during the backoff window. Cached quota is the last `HeartbeatResponse.quotas` received. If the cache is stale beyond the grace period, the cluster self-degrades (see [Missed Heartbeat Handling](#missed-heartbeat-handling)).
+3. No usage data is lost — the next successful heartbeat carries the cumulative delta since the last acknowledged sequence.
+
+### Circuit Breakers
+
+Temporal activities wrap TigerBeetle and PostgreSQL calls with circuit breakers:
+
+- **Open** state: activity fails fast with a retryable error (Temporal retries with exponential backoff).
+- **Half-open** after 30s: one probe request is allowed through. If it succeeds, the circuit closes; if it fails, the circuit re-opens.
+- **Effect on enforcement**: during a TigerBeetle outage, quota snapshot reads from PostgreSQL remain available. Hard limit enforcement is temporarily suspended (TB is unavailable to reject transfers), but usage continues to accrue in Temporal's batch. When TB recovers, the backlog is submitted with idempotent IDs — no double-counting.
 
 ---
 
@@ -1353,6 +1557,23 @@ Each failure mode is documented as: **Problem / Current Mitigation / Fix**.
 
 ---
 
+## System Invariants
+
+The following invariants must hold at all times. Any code change to the accounting system must be reviewed against this table before merging.
+
+| # | Invariant | Enforcement |
+|---|---|---|
+| I-1 | **One TigerBeetle writer per tenant** | All TB writes go through `TenantAccountingWorkflow`. `QuotaAdjustmentWorkflow` signals the tenant workflow and never writes TB directly. `BillingResetWorkflow` is the sole exception (it runs during period close when `TenantAccountingWorkflow` is quiesced). |
+| I-2 | **One heartbeat sequence processed at most once per cluster** | `processed_seqs[cluster_id]` is monotonic. Any signal with `seq ≤ last_processed_seq` is dropped at the signal handler before scheduling any activity. TigerBeetle idempotent transfer IDs provide the final backstop. |
+| I-3 | **Hard limit correctness comes only from TigerBeetle** | `debits_must_not_exceed_credits` on the tenant quota account is the sole hard limit enforcement mechanism. Soft limits, quota snapshots, and application-level checks are advisory. No application code path can bypass TB's atomic rejection. |
+| I-4 | **PostgreSQL snapshots are projections and may lag** | `quota_snapshots` reflects the last completed Temporal flush, typically 10–120s behind TigerBeetle. It is never authoritative for hard limit enforcement. Code must not use snapshot values to gate quota decisions. |
+| I-5 | **Gauge resources are represented only by active pending transfers** | For point-in-time resources (active_nodes, active_users), `debits_pending` counts live slots. `debits_posted` counts expired/voided slots (historical). The sum `debits_pending + debits_posted` must never exceed `credits_posted` — this is enforced atomically by TB. |
+| I-6 | **Billing reset is idempotent and atomic** | `BillingResetWorkflow` uses `flags.linked` for drain+re-credit (atomic) and deterministic transfer IDs (idempotent). Temporal `REJECT_DUPLICATE` workflow ID policy prevents double-execution for the same period boundary. |
+| I-7 | **Server clock is authoritative for billing timestamps** | Client `sequence_number` is used for ordering and dedup only. TigerBeetle transfer timestamps are set server-side. Client-reported timestamps are never used for billing period assignment. |
+| I-8 | **Corrections require explicit Admin authority** | `USAGE_CORRECTION` (code 201) is only valid via `QuotaAdjustmentWorkflow` with Admin role. Support role may issue positive-only `QUOTA_ADJUSTMENT` (code 101) credits but cannot issue corrections that may be negative. |
+
+---
+
 ## RBAC & Admin Workflows
 
 ### User Roles
@@ -1372,6 +1593,10 @@ service AdminService {
   rpc CreateSurgePack(CreateSurgePackRequest) returns (CreateSurgePackResponse);
   rpc PropagatePlanChange(PropagatePlanChangeRequest) returns (PropagatePlanChangeResponse);
 
+  // Admin only — approve/reject pending credit adjustments (four-eyes gate)
+  rpc ApproveCreditAdjustment(ApproveCreditAdjustmentRequest) returns (ApproveCreditAdjustmentResponse);
+  rpc RejectCreditAdjustment(RejectCreditAdjustmentRequest) returns (RejectCreditAdjustmentResponse);
+
   // Support + Admin
   rpc IssueTenantCredit(IssueTenantCreditRequest) returns (IssueTenantCreditResponse);
 
@@ -1379,10 +1604,51 @@ service AdminService {
   rpc GetUsageReport(GetUsageReportRequest) returns (GetUsageReportResponse);
   rpc GetBillingSnapshot(GetBillingSnapshotRequest) returns (GetBillingSnapshotResponse);
   rpc ListTenantQuotas(ListTenantQuotasRequest) returns (ListTenantQuotasResponse);
+  rpc ListPendingAdjustments(ListPendingAdjustmentsRequest) returns (ListPendingAdjustmentsResponse);
+}
+
+message ApproveCreditAdjustmentRequest {
+  string adjustment_id = 1;  // credit_adjustments.id
+  string approver_note = 2;  // optional
+}
+
+message ApproveCreditAdjustmentResponse {
+  string adjustment_id = 1;
+  string status        = 2;  // "approved"
+}
+
+message RejectCreditAdjustmentRequest {
+  string adjustment_id  = 1;
+  string rejection_note = 2;
+}
+
+message RejectCreditAdjustmentResponse {
+  string adjustment_id = 1;
+  string status        = 2;  // "rejected"
+}
+
+message ListPendingAdjustmentsRequest {
+  string tenant_id      = 1;  // optional filter
+  string resource_type  = 2;  // optional filter
+}
+
+message ListPendingAdjustmentsResponse {
+  repeated PendingAdjustment adjustments = 1;
+}
+
+message PendingAdjustment {
+  string adjustment_id   = 1;
+  string tenant_id       = 2;
+  string resource_type   = 3;
+  int64  amount          = 4;
+  string adjustment_type = 5;
+  string issued_by       = 6;
+  string requested_at    = 7;
+  int64  threshold       = 8;
 }
 ```
 
-All write methods emit audit events. The `user_data_128` field on audit-related TigerBeetle transfers stores the issuer's user ID. Every manual credit issuance creates a `credit_adjustments` record in PostgreSQL.
+All write methods emit audit events. The `user_data_128` field on audit-related TigerBeetle transfers stores the issuer's user ID. Every credit issuance creates a `credit_adjustments` record in PostgreSQL; above-threshold adjustments remain in `status='pending_approval'` until a second Admin approves or rejects via `ApproveCreditAdjustment` / `RejectCreditAdjustment`.
 
 ### ProvisioningService
 
@@ -1642,7 +1908,7 @@ Options:
 
 11. **Bootstrap token delivery**: `RegisterClusterResponse` returns the one-time bootstrap token over the Admin API (corporate network, JWT-authenticated). For air-gapped or highly regulated environments, out-of-band delivery may be required — options include: (a) encrypted S3 object readable only by the target cluster's IAM role, (b) Vault AppRole with a wrapped secret-id, (c) operator copy-paste over a secure channel. Decision affects the operational runbook for new cluster onboarding.
 
-12. **Four-eyes principle for large credit adjustments**: Manual credits issued via `IssueTenantCredit` currently require only a single Admin or Support approval. For adjustments above a configurable threshold (e.g., >10,000 credits), a second approver may be required before `QuotaAdjustmentWorkflow` executes. Options: (a) workflow-level approval gate in Temporal (signals from two distinct issuer IDs), (b) external approval via ticketing system (Jira/Linear), (c) audit-only (log but don't gate). Affects `AdminService.IssueTenantCredit` implementation and the `credit_adjustments` schema.
+12. **Four-eyes principle for large credit adjustments** _(promoted to design decision)_: Adjustments above a configurable threshold require a second Admin approver before `QuotaAdjustmentWorkflow` submits the TB transfer. Implemented as a Temporal signal gate inside `QuotaAdjustmentWorkflow` (Activity 3): the workflow blocks on `approve_adjustment` / `reject_adjustment` signals with a 72h auto-reject timeout. Approver must be a different Admin (`approver_id != issuer_id`). Pending adjustments are surfaced via `AdminService.ListPendingAdjustments` and approved/rejected via `ApproveCreditAdjustment` / `RejectCreditAdjustment`. The `credit_adjustments` schema carries `status`, `approved_by`, `approval_threshold`, and `resolved_at` columns. See [QuotaAdjustmentWorkflow](#quotaadjustmentworkflow-triggered-by-admin-actions).
 
 13. **Minimum agent version policy**: The server logs warnings for agents below a minimum supported version (tracked via `agent_version` in `HeartbeatRequest`). Policy options: (a) warn-only indefinitely, (b) warn for N days then hard-block (reject heartbeats from below-minimum agents), (c) forced upgrade via `COMMAND_TYPE_ROTATE_KEYS` + rolling restart trigger. Affects backward-compatibility guarantees and rolling upgrade runbooks.
 
@@ -1734,7 +2000,7 @@ Root CA (offline, air-gapped)
 | HeartbeatService | DoS | Rogue agent floods heartbeats, exhausting Temporal worker capacity | Per-cluster rate limit: 1 msg/s, burst 3; gRPC max message size enforced at gateway; `RESOURCE_EXHAUSTED` backpressure |
 | HeartbeatService | Elevation of Privilege | Cluster mTLS cert used to call `AdminService` or `ProvisioningService` | Separate auth mechanisms: `HeartbeatService` uses mTLS only; `AdminService`/`ProvisioningService` use JWT only; no cross-over possible at the gateway interceptor level |
 | AdminService | Spoofing | Stolen JWT used to issue unauthorized credits | 15min access token TTL; refresh token rotation on each use; IdP session revocation |
-| AdminService | Tampering | Admin issues unauthorized manual credits | Audit trail in `credit_adjustments` with `issued_by`; four-eyes principle for large amounts (see [Open Question #12](#open-questions--decisions-needed)) |
+| AdminService | Tampering | Admin issues unauthorized manual credits | Audit trail in `credit_adjustments` with `issued_by`; four-eyes approval gate in `QuotaAdjustmentWorkflow` for amounts above threshold (72h timeout, `approver_id != issuer_id`); all write methods emit structured audit events |
 | AdminService | Elevation of Privilege | Support role calls Admin-only RPCs | ConnectRPC interceptor checks JWT `role` claim per method; `ProvisioningService` is Admin-only at the interceptor level |
 | Bootstrap Token | Spoofing | Token intercepted and used by an attacker to obtain a cluster cert | 1h TTL; one-time use tracked in `bootstrap_tokens.used_at`; delivered over JWT-authenticated Admin API (corporate network only) |
 | Temporal | Tampering | Unauthorized signal injection bypasses gateway auth | Temporal namespace isolation; internal-only network (not exposed outside the control plane); mTLS between Temporal workers and server |
