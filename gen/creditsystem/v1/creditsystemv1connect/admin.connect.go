@@ -48,6 +48,12 @@ const (
 	// AdminServiceListCreditAdjustmentsProcedure is the fully-qualified name of the AdminService's
 	// ListCreditAdjustments RPC.
 	AdminServiceListCreditAdjustmentsProcedure = "/creditsystem.v1.AdminService/ListCreditAdjustments"
+	// AdminServiceDeleteTenantProcedure is the fully-qualified name of the AdminService's DeleteTenant
+	// RPC.
+	AdminServiceDeleteTenantProcedure = "/creditsystem.v1.AdminService/DeleteTenant"
+	// AdminServiceDeregisterClusterProcedure is the fully-qualified name of the AdminService's
+	// DeregisterCluster RPC.
+	AdminServiceDeregisterClusterProcedure = "/creditsystem.v1.AdminService/DeregisterCluster"
 )
 
 // AdminServiceClient is a client for the creditsystem.v1.AdminService service.
@@ -62,6 +68,10 @@ type AdminServiceClient interface {
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
 	// ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
 	ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error)
+	// DeleteTenant soft-deletes a tenant (status → deregistered, sets deleted_at).
+	DeleteTenant(context.Context, *connect.Request[v1.DeleteTenantRequest]) (*connect.Response[v1.DeleteTenantResponse], error)
+	// DeregisterCluster soft-deregisters a workload cluster (status → deregistered, sets deregistered_at).
+	DeregisterCluster(context.Context, *connect.Request[v1.DeregisterClusterRequest]) (*connect.Response[v1.DeregisterClusterResponse], error)
 }
 
 // NewAdminServiceClient constructs a client for the creditsystem.v1.AdminService service. By
@@ -105,6 +115,18 @@ func NewAdminServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(adminServiceMethods.ByName("ListCreditAdjustments")),
 			connect.WithClientOptions(opts...),
 		),
+		deleteTenant: connect.NewClient[v1.DeleteTenantRequest, v1.DeleteTenantResponse](
+			httpClient,
+			baseURL+AdminServiceDeleteTenantProcedure,
+			connect.WithSchema(adminServiceMethods.ByName("DeleteTenant")),
+			connect.WithClientOptions(opts...),
+		),
+		deregisterCluster: connect.NewClient[v1.DeregisterClusterRequest, v1.DeregisterClusterResponse](
+			httpClient,
+			baseURL+AdminServiceDeregisterClusterProcedure,
+			connect.WithSchema(adminServiceMethods.ByName("DeregisterCluster")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -115,6 +137,8 @@ type adminServiceClient struct {
 	listTenants           *connect.Client[v1.ListTenantsRequest, v1.ListTenantsResponse]
 	listClusters          *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
 	listCreditAdjustments *connect.Client[v1.ListCreditAdjustmentsRequest, v1.ListCreditAdjustmentsResponse]
+	deleteTenant          *connect.Client[v1.DeleteTenantRequest, v1.DeleteTenantResponse]
+	deregisterCluster     *connect.Client[v1.DeregisterClusterRequest, v1.DeregisterClusterResponse]
 }
 
 // IssueTenantCredit calls creditsystem.v1.AdminService.IssueTenantCredit.
@@ -142,6 +166,16 @@ func (c *adminServiceClient) ListCreditAdjustments(ctx context.Context, req *con
 	return c.listCreditAdjustments.CallUnary(ctx, req)
 }
 
+// DeleteTenant calls creditsystem.v1.AdminService.DeleteTenant.
+func (c *adminServiceClient) DeleteTenant(ctx context.Context, req *connect.Request[v1.DeleteTenantRequest]) (*connect.Response[v1.DeleteTenantResponse], error) {
+	return c.deleteTenant.CallUnary(ctx, req)
+}
+
+// DeregisterCluster calls creditsystem.v1.AdminService.DeregisterCluster.
+func (c *adminServiceClient) DeregisterCluster(ctx context.Context, req *connect.Request[v1.DeregisterClusterRequest]) (*connect.Response[v1.DeregisterClusterResponse], error) {
+	return c.deregisterCluster.CallUnary(ctx, req)
+}
+
 // AdminServiceHandler is an implementation of the creditsystem.v1.AdminService service.
 type AdminServiceHandler interface {
 	// IssueTenantCredit adds credits to a tenant's quota wallet (surge pack or manual adjustment).
@@ -154,6 +188,10 @@ type AdminServiceHandler interface {
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
 	// ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
 	ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error)
+	// DeleteTenant soft-deletes a tenant (status → deregistered, sets deleted_at).
+	DeleteTenant(context.Context, *connect.Request[v1.DeleteTenantRequest]) (*connect.Response[v1.DeleteTenantResponse], error)
+	// DeregisterCluster soft-deregisters a workload cluster (status → deregistered, sets deregistered_at).
+	DeregisterCluster(context.Context, *connect.Request[v1.DeregisterClusterRequest]) (*connect.Response[v1.DeregisterClusterResponse], error)
 }
 
 // NewAdminServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -193,6 +231,18 @@ func NewAdminServiceHandler(svc AdminServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(adminServiceMethods.ByName("ListCreditAdjustments")),
 		connect.WithHandlerOptions(opts...),
 	)
+	adminServiceDeleteTenantHandler := connect.NewUnaryHandler(
+		AdminServiceDeleteTenantProcedure,
+		svc.DeleteTenant,
+		connect.WithSchema(adminServiceMethods.ByName("DeleteTenant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	adminServiceDeregisterClusterHandler := connect.NewUnaryHandler(
+		AdminServiceDeregisterClusterProcedure,
+		svc.DeregisterCluster,
+		connect.WithSchema(adminServiceMethods.ByName("DeregisterCluster")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/creditsystem.v1.AdminService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AdminServiceIssueTenantCreditProcedure:
@@ -205,6 +255,10 @@ func NewAdminServiceHandler(svc AdminServiceHandler, opts ...connect.HandlerOpti
 			adminServiceListClustersHandler.ServeHTTP(w, r)
 		case AdminServiceListCreditAdjustmentsProcedure:
 			adminServiceListCreditAdjustmentsHandler.ServeHTTP(w, r)
+		case AdminServiceDeleteTenantProcedure:
+			adminServiceDeleteTenantHandler.ServeHTTP(w, r)
+		case AdminServiceDeregisterClusterProcedure:
+			adminServiceDeregisterClusterHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -232,4 +286,12 @@ func (UnimplementedAdminServiceHandler) ListClusters(context.Context, *connect.R
 
 func (UnimplementedAdminServiceHandler) ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("creditsystem.v1.AdminService.ListCreditAdjustments is not implemented"))
+}
+
+func (UnimplementedAdminServiceHandler) DeleteTenant(context.Context, *connect.Request[v1.DeleteTenantRequest]) (*connect.Response[v1.DeleteTenantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("creditsystem.v1.AdminService.DeleteTenant is not implemented"))
+}
+
+func (UnimplementedAdminServiceHandler) DeregisterCluster(context.Context, *connect.Request[v1.DeregisterClusterRequest]) (*connect.Response[v1.DeregisterClusterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("creditsystem.v1.AdminService.DeregisterCluster is not implemented"))
 }

@@ -205,6 +205,7 @@ func main() {
 	// ─── Web UI ──────────────────────────────────────────────────────────────
 	uiHandler := webui.NewHandler(pool, startTime, hbHandler, streamMgr)
 	mux.Handle("/ui", uiHandler)
+	mux.Handle("/sim", uiHandler)
 	mux.Handle("/api/ui/stats", uiHandler)
 	mux.Handle("/api/ui/report", uiHandler)
 

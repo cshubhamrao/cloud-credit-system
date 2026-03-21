@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Credit System</title>
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <style>
+    body { font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace; }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+    #site-header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border-color);
+      position: sticky; top: 0;
+      background: var(--bg-color);
+      z-index: 100;
+    }
+    #site-header .spacer { flex: 1; }
+    main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+    @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+    .mt { margin-top: 24px; }
+
+    /* ── Runtime stat cards ─────────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--secondary-bg-color, rgba(128,128,128,.08));
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em; opacity: .5; margin-bottom: 4px; }
+    .stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+    .stat-sub   { font-size: 0.72rem; opacity: .45; margin-top: 3px; }
+
+    /* ── Quota bars ─────────────────────────────────────────────────────── */
+    .qbar { margin: 8px 0; }
+    .qbar-row { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 3px; }
+    .qbar-bg  { height: 6px; border-radius: 3px; overflow: hidden; background: var(--border-color); }
+    .qbar-fill { height: 100%; border-radius: 3px; transition: width .4s; background: var(--link-color, #3b82f6); }
+    .qbar-fill.warn     { background: #f59e0b; }
+    .qbar-fill.exceeded { background: #ef4444; }
+
+    /* ── Alerts ─────────────────────────────────────────────────────────── */
+    #dash-alerts { margin-bottom: 20px; display: none; }
+    .alert-row {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      margin-bottom: 6px;
+      border: 1px solid;
+    }
+    .alert-row.warn  { border-color: #78350f; background: rgba(120,53,15,.15); color: #fbbf24; }
+    .alert-row.error { border-color: #7f1d1d; background: rgba(127,29,29,.15); color: #f87171; }
+
+    /* ── Tenant dashboard cards ─────────────────────────────────────────── */
+    .tenant-card { margin-bottom: 16px; }
+    .tenant-card header { flex-wrap: wrap; gap: 6px; }
+    .cluster-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 4px; font-size: 0.72rem;
+      border: 1px solid var(--border-color);
+      background: var(--secondary-bg-color, rgba(128,128,128,.06));
+    }
+    .chip.stale { border-color: #78350f; color: #fbbf24; }
+
+    /* ── Event log ──────────────────────────────────────────────────────── */
+    #log-list { max-height: 300px; overflow-y: auto; font-size: 0.75rem; }
+    .log-line { padding: 2px 4px; border-bottom: 1px solid var(--border-color); }
+    .log-line.ok   { color: #4ade80; }
+    .log-line.warn { color: #fbbf24; }
+    .log-line.err  { color: #f87171; }
+
+    /* ── Scenario cards ─────────────────────────────────────────────────── */
+    .sc-card { margin-bottom: 10px; }
+    .sc-running { outline: 2px solid #22c55e; outline-offset: 2px; }
+    .sc-meta { font-size: 0.7rem; opacity: .5; margin-top: 4px; font-family: monospace; }
+
+    /* ── Expression hint ─────────────────────────────────────────────────── */
+    details summary { font-size: 0.75rem; cursor: pointer; opacity: .6; }
+    pre.hint { margin: 6px 0 0; padding: 8px 10px; font-size: 0.72rem; line-height: 1.7;
+               border-radius: 4px; background: rgba(0,0,0,.25); }
+
+    /* ── Misc ────────────────────────────────────────────────────────────── */
+    .muted     { opacity: .5; }
+    .small-id  { font-family: monospace; font-size: 0.7rem; opacity: .4; }
+    .mono      { font-family: monospace; }
+    .hstack    { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .danger-text { color: #f87171; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header id="site-header">
+  <strong>Cloud Credit System</strong>
+  <span class="muted" style="font-size:.8rem">Admin</span>
+  <span class="spacer"></span>
+  <span id="hdr-status" class="muted" style="font-size:.75rem"></span>
+  <span id="hdr-err" class="badge" style="display:none;background:#7f1d1d;color:#fca5a5">error</span>
+</header>
+
+<!-- ── Confirm dialog ─────────────────────────────────────────────────────── -->
+<dialog id="confirm-dlg">
+  <form method="dialog">
+    <header><h3 id="cdlg-title">Confirm</h3></header>
+    <p id="cdlg-body" style="margin:0 0 16px"></p>
+    <footer class="hstack" style="justify-content:flex-end">
+      <button value="cancel" class="outline">Cancel</button>
+      <button value="ok" data-variant="danger">Delete / Deregister</button>
+    </footer>
+  </form>
+</dialog>
+
+<main>
+<ot-tabs>
+  <div role="tablist">
+    <button role="tab">Dashboard</button>
+    <button role="tab">Tenants</button>
+    <button role="tab">Clusters</button>
+    <button role="tab">Simulator</button>
+    <button role="tab">Credits</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TAB 1 — Dashboard
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div role="tabpanel">
+    <!-- Runtime stats -->
+    <div class="stat-grid" id="rt-grid">
+      <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" id="rt-uptime">—</div></div>
+      <div class="stat-card"><div class="stat-label">Streams</div><div class="stat-value" id="rt-streams">—</div></div>
+      <div class="stat-card"><div class="stat-label">Msg/sec</div><div class="stat-value" id="rt-mps">—</div><div class="stat-sub" id="rt-total"></div></div>
+      <div class="stat-card"><div class="stat-label">Signal P50</div><div class="stat-value" id="rt-p50">—</div><div class="stat-sub" id="rt-p99"></div></div>
+      <div class="stat-card"><div class="stat-label">Heap</div><div class="stat-value" id="rt-heap">—</div><div class="stat-sub" id="rt-goroutines"></div></div>
+    </div>
+
+    <!-- Alerts -->
+    <div id="dash-alerts"></div>
+
+    <!-- Tenant cards -->
+    <div id="dash-tenants"><p class="muted">Loading…</p></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TAB 2 — Tenants
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div role="tabpanel">
+    <div class="grid-2">
+      <article class="card">
+        <header><h3>Register Tenant</h3></header>
+        <form id="form-tenant">
+          <label data-field>
+            Name
+            <input type="text" id="t-name" placeholder="Acme Corp" required>
+          </label>
+          <label data-field>
+            Billing Tier
+            <select id="t-tier">
+              <option value="free">free</option>
+              <option value="starter">starter</option>
+              <option value="pro" selected>pro</option>
+              <option value="enterprise">enterprise</option>
+            </select>
+          </label>
+          <label data-field>
+            CPU Hours Credits <span class="muted">(0 = tier default)</span>
+            <input type="number" id="t-cpu" value="0" min="0">
+          </label>
+          <label data-field>
+            Memory GB·h Credits
+            <input type="number" id="t-mem" value="0" min="0">
+          </label>
+          <label data-field>
+            Active Nodes Limit
+            <input type="number" id="t-nodes" value="0" min="0">
+          </label>
+          <footer class="hstack">
+            <button type="submit" id="btn-tenant">Register</button>
+          </footer>
+        </form>
+      </article>
+
+      <article class="card">
+        <header>
+          <h3>Tenants</h3>
+          <button class="outline small" onclick="loadTenants()">↻</button>
+        </header>
+        <div id="tenant-list"><p class="muted">Loading…</p></div>
+      </article>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TAB 3 — Clusters
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div role="tabpanel">
+    <div class="grid-2">
+      <article class="card">
+        <header><h3>Register Cluster</h3></header>
+        <form id="form-cluster">
+          <label data-field>
+            Tenant
+            <select id="c-tenant"><option value="">— loading —</option></select>
+          </label>
+          <label data-field>
+            Cloud Provider
+            <select id="c-provider">
+              <option value="aws">aws</option>
+              <option value="gcp">gcp</option>
+              <option value="azure">azure</option>
+            </select>
+          </label>
+          <label data-field>
+            Region
+            <input type="text" id="c-region" placeholder="us-east-1" required>
+          </label>
+          <footer class="hstack">
+            <button type="submit" id="btn-cluster">Register</button>
+          </footer>
+        </form>
+      </article>
+
+      <article class="card">
+        <header>
+          <h3>Clusters</h3>
+          <button class="outline small" onclick="loadClusters()">↻</button>
+        </header>
+        <div id="cluster-list"><p class="muted">Loading…</p></div>
+      </article>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TAB 4 — Simulator
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div role="tabpanel">
+    <div class="grid-2">
+      <!-- Scenario builder -->
+      <article class="card">
+        <header><h3>New Scenario</h3></header>
+        <form id="form-scenario">
+          <label data-field>
+            Name
+            <input type="text" id="sc-name" placeholder="Burst CPU" required>
+          </label>
+          <label data-field>
+            Cluster
+            <select id="sc-cluster"><option value="">— register a cluster first —</option></select>
+          </label>
+          <label data-field>
+            Interval (ms)
+            <input type="number" id="sc-interval" value="1000" min="100" step="100" required>
+          </label>
+          <label data-field>
+            CPU ms delta <span class="muted">expression</span>
+            <input type="text" id="sc-cpu" value="rand(10000, 60000)" required>
+          </label>
+          <label data-field>
+            Memory MB·s delta <span class="muted">expression</span>
+            <input type="text" id="sc-mem" value="rand(5000, 25000)" required>
+          </label>
+          <label data-field>
+            Active nodes <span class="muted">expression</span>
+            <input type="text" id="sc-nodes" value="randInt(2, 5)" required>
+          </label>
+          <details>
+            <summary>Expression helpers</summary>
+            <pre class="hint">rand(min, max)    → random float in [min, max)
+randInt(min, max) → random int in [min, max]
+seq               → current sequence number
+t                 → elapsed seconds since start
+
+Examples:
+  rand(100000, 300000)              burst / exhaustion test
+  t &lt; 30 ? rand(5e4,3e5) : 5000   spike then idle
+  seq % 5 === 0 ? 100000 : 10000   periodic burst</pre>
+          </details>
+          <footer class="hstack" style="margin-top:14px">
+            <button type="submit">▶ Add &amp; Start</button>
+            <button type="button" class="outline" id="btn-add-paused">Add paused</button>
+          </footer>
+        </form>
+      </article>
+
+      <!-- Running scenarios -->
+      <article class="card">
+        <header>
+          <h3>Scenarios <span id="sc-running-badge"></span></h3>
+          <button class="outline small" data-variant="danger" onclick="stopAllScenarios()">■ Stop All</button>
+        </header>
+        <div id="scenario-list"><p class="muted">No scenarios yet.</p></div>
+      </article>
+    </div>
+
+    <!-- Event log -->
+    <article class="card mt">
+      <header>
+        <h3>Event Log</h3>
+        <span id="log-count" class="muted" style="font-size:.75rem"></span>
+        <button class="outline small" onclick="clearLog()" style="margin-left:auto">Clear</button>
+      </header>
+      <div id="log-list"></div>
+    </article>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       TAB 5 — Credits
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div role="tabpanel">
+    <div class="grid-2">
+      <article class="card">
+        <header><h3>Issue Credit</h3></header>
+        <form id="form-credit">
+          <label data-field>
+            Tenant
+            <select id="cr-tenant"><option value="">— loading —</option></select>
+          </label>
+          <label data-field>
+            Resource Type
+            <select id="cr-resource">
+              <option value="cpu_hours">cpu_hours</option>
+              <option value="memory_gb_hours">memory_gb_hours</option>
+              <option value="active_nodes">active_nodes</option>
+            </select>
+          </label>
+          <label data-field>
+            Amount
+            <input type="number" id="cr-amount" value="500000" min="1" required>
+          </label>
+          <label data-field>
+            Reason
+            <input type="text" id="cr-reason" placeholder="Emergency surge pack" required>
+          </label>
+          <footer class="hstack">
+            <button type="submit" id="btn-credit">Issue Credit</button>
+          </footer>
+        </form>
+      </article>
+
+      <article class="card">
+        <header>
+          <h3>Credit Adjustments</h3>
+          <button class="outline small" onclick="loadAdjustments()">↻</button>
+        </header>
+        <label data-field style="margin-bottom:12px">
+          Tenant
+          <select id="adj-tenant" onchange="loadAdjustments()">
+            <option value="">— select tenant —</option>
+          </select>
+        </label>
+        <div id="adj-list"><p class="muted">Select a tenant above.</p></div>
+      </article>
+    </div>
+  </div>
+
+</ot-tabs>
+</main>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+// ── RPC ─────────────────────────────────────────────────────────────────────
+async function rpc(svc, method, body = {}) {
+  const resp = await fetch(`/creditsystem.v1.${svc}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(`${method}: ${json.message || resp.statusText}`);
+  return json;
+}
+const admin = (m, b) => rpc('AdminService',        m, b);
+const prov  = (m, b) => rpc('ProvisioningService', m, b);
+const hb    = (m, b) => rpc('HeartbeatService',    m, b);
+
+// ── State ────────────────────────────────────────────────────────────────────
+let tenants   = [];
+let clusters  = [];
+let scenarios = [];
+const clusterSeq     = {};
+const clusterLastAck = {};
+// Debounce quota-warning toasts: only fire on transition
+const alertedStates  = new Set();
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function toast(title, msg, variant = 'success') {
+  if (typeof ot !== 'undefined') {
+    try { ot.toast(title, msg, { variant }); } catch (_) {}
+  }
+}
+
+// ── Confirm dialog ───────────────────────────────────────────────────────────
+function confirmDialog(title, body) {
+  return new Promise(resolve => {
+    const d = document.getElementById('confirm-dlg');
+    document.getElementById('cdlg-title').textContent = title;
+    document.getElementById('cdlg-body').textContent  = body;
+    d.showModal();
+    d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
+  });
+}
+
+// ── Log ──────────────────────────────────────────────────────────────────────
+const MAX_LOG = 400;
+let logCount = 0;
+function log(msg, level = 'info') {
+  const el = document.getElementById('log-list');
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const div = document.createElement('div');
+  div.className = `log-line ${level}`;
+  div.textContent = `[${ts}] ${msg}`;
+  el.prepend(div);
+  while (el.children.length > MAX_LOG) el.lastChild.remove();
+  document.getElementById('log-count').textContent = `${++logCount} entries`;
+}
+function clearLog() {
+  document.getElementById('log-list').innerHTML = '';
+  logCount = 0;
+  document.getElementById('log-count').textContent = '';
+}
+
+// ── Format helpers ───────────────────────────────────────────────────────────
+function fmtNum(n, dec = 1) {
+  if (n == null) return '—';
+  if (n >= 1e9) return (n / 1e9).toFixed(dec) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(dec) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(dec) + 'K';
+  return dec === 0 ? String(Math.round(n)) : Number(n).toFixed(dec);
+}
+function fmtDuration(s) {
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+}
+function fmtAgo(ts) {
+  if (!ts) return '—';
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s <  5)    return 'just now';
+  if (s < 60)    return s + 's ago';
+  if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+  return new Date(ts).toLocaleTimeString();
+}
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+const RESOURCE_LABELS = {
+  cpu_hours:       'CPU Hours',
+  memory_gb_hours: 'Memory GB·h',
+  active_nodes:    'Active Nodes',
+};
+const STALE_MS = 5 * 60 * 1000;
+
+// ── Expression evaluator ─────────────────────────────────────────────────────
+function evalExpr(expr, seq, t) {
+  const rand    = (a, b) => Math.random() * (b - a) + a;
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  // eslint-disable-next-line no-new-func
+  return new Function('rand', 'randInt', 'seq', 't', `return (${expr});`)(rand, randInt, seq, t);
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+// 3 parallel calls total regardless of tenant count:
+//   /api/ui/stats   — runtime metrics (in-process, not RPC)
+//   /api/ui/report  — all quota snapshots + stale clusters in one DB query
+//   ListTenants     — always fresh so new tenants appear immediately
+// Cluster chips use local `clusters` state (updated by register/deregister actions).
+async function pollDashboard() {
+  try {
+    const [rt, report, { tenants: freshTenants }] = await Promise.all([
+      fetch('/api/ui/stats').then(r => r.json()),
+      fetch('/api/ui/report').then(r => r.json()),
+      admin('ListTenants'),
+    ]);
+
+    // Runtime stats
+    document.getElementById('rt-uptime').textContent     = fmtDuration(rt.uptime_s);
+    document.getElementById('rt-streams').textContent    = rt.active_streams;
+    document.getElementById('rt-mps').textContent        = rt.msg_per_sec.toFixed(1);
+    document.getElementById('rt-total').textContent      = 'total: ' + fmtNum(rt.msg_total, 0);
+    document.getElementById('rt-p50').textContent        = rt.signal_p50_us + 'µs';
+    document.getElementById('rt-p99').textContent        = 'P99: ' + rt.signal_p99_us + 'µs';
+    document.getElementById('rt-heap').textContent       = rt.heap_alloc_mb.toFixed(1) + ' MB';
+    document.getElementById('rt-goroutines').textContent = rt.goroutines + ' goroutines';
+
+    // Refresh tenant list (picks up new registrations / deletions)
+    tenants = freshTenants || [];
+    syncTenantSelects();
+
+    // Build quota map from batch report snapshot.
+    // report.quota_snapshots shape: { tenant_id, resource_type, credits_total,
+    //   debits_posted, debits_pending, available, snapshot_at }
+    const quotasByTenant = {};
+    for (const s of report.quota_snapshots || []) {
+      const tid = s.tenant_id;
+      if (!quotasByTenant[tid]) quotasByTenant[tid] = [];
+      // active_nodes is a gauge — "used" is pending (point-in-time), not posted (flow)
+      const used = s.resource_type === 'active_nodes' ? s.debits_pending : s.debits_posted;
+      const pct  = s.credits_total > 0 ? used / s.credits_total : 0;
+      let status = 'STATUS_OK';
+      if (s.available <= 0)  status = 'STATUS_QUOTA_EXCEEDED';
+      else if (pct >= 0.8)   status = 'STATUS_QUOTA_WARNING';
+      quotasByTenant[tid].push({ resourceType: s.resource_type, used, limit: s.credits_total, available: s.available, status });
+    }
+
+    // Build rows using local cluster state (no per-tenant RPC needed)
+    const rows = tenants.map(t => ({
+      tenant:   t,
+      quotas:   quotasByTenant[t.id] || [],
+      clusters: clusters.filter(c => c.tenantId === t.id),
+    }));
+
+    renderDashAlerts(rows);
+    renderDashTenants(rows);
+
+    document.getElementById('hdr-status').textContent = 'updated ' + new Date().toLocaleTimeString();
+    document.getElementById('hdr-err').style.display = 'none';
+  } catch (e) {
+    document.getElementById('hdr-err').style.display = '';
+    document.getElementById('hdr-err').textContent = e.message;
+  }
+}
+
+function renderDashAlerts(rows) {
+  const alerts = [];
+  for (const { tenant, quotas, clusters: cls } of rows) {
+    for (const q of quotas) {
+      const key = `${tenant.id}:${q.resourceType}`;
+      if (q.status === 'STATUS_QUOTA_EXCEEDED') {
+        alerts.push({ level: 'error', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resourceType] || q.resourceType} EXCEEDED (avail: ${fmtNum(Number(q.available || 0), 0)})` });
+        if (!alertedStates.has(key + ':exceeded')) {
+          alertedStates.add(key + ':exceeded');
+          alertedStates.delete(key + ':warning');
+          toast(`${tenant.name}: quota exceeded`, `${RESOURCE_LABELS[q.resourceType] || q.resourceType} — avail: ${fmtNum(Number(q.available || 0), 0)}`, 'error');
+        }
+      } else if (q.status === 'STATUS_QUOTA_WARNING') {
+        alerts.push({ level: 'warn', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resourceType] || q.resourceType} warning (avail: ${fmtNum(Number(q.available || 0), 0)})` });
+        if (!alertedStates.has(key + ':warning') && !alertedStates.has(key + ':exceeded')) {
+          alertedStates.add(key + ':warning');
+          toast(`${tenant.name}: quota warning`, `${RESOURCE_LABELS[q.resourceType] || q.resourceType} — avail: ${fmtNum(Number(q.available || 0), 0)}`, 'warning');
+        }
+      } else {
+        alertedStates.delete(key + ':warning');
+        alertedStates.delete(key + ':exceeded');
+      }
+    }
+    // Stale cluster alerts (outside quota loop — one check per cluster)
+    for (const c of cls) {
+      if (c.lastHeartbeat && (Date.now() - new Date(c.lastHeartbeat)) > STALE_MS) {
+        alerts.push({ level: 'warn', msg: `${tenant.name} — cluster ${(c.cloudProvider || '').toUpperCase()} ${c.region} stale (${fmtAgo(c.lastHeartbeat)})` });
+      }
+    }
+  }
+  const el = document.getElementById('dash-alerts');
+  if (!alerts.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = alerts.map(a =>
+    `<div class="alert-row ${a.level}">${esc(a.msg)}</div>`
+  ).join('');
+}
+
+function renderDashTenants(rows) {
+  const el = document.getElementById('dash-tenants');
+  if (!rows.length) { el.innerHTML = '<p class="muted">No tenants registered.</p>'; return; }
+  el.innerHTML = rows.map(({ tenant: t, quotas, clusters: cls }) => {
+    const quotasHtml = quotas.length
+      ? quotas.map(q => {
+          const used    = Number(q.used  || 0);
+          const limit   = Number(q.limit || 0);
+          const avail   = Number(q.available || 0);
+          const pct     = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+          const fillCls = q.status === 'STATUS_QUOTA_EXCEEDED' ? 'exceeded' : q.status === 'STATUS_QUOTA_WARNING' ? 'warn' : '';
+          const badge   = q.status === 'STATUS_QUOTA_EXCEEDED'
+            ? '<span class="badge danger" style="font-size:.65rem;margin-left:4px">EXCEEDED</span>'
+            : q.status === 'STATUS_QUOTA_WARNING'
+            ? '<span class="badge" style="font-size:.65rem;margin-left:4px;background:#78350f;color:#fcd34d">WARN</span>'
+            : '';
+          return `<div class="qbar">
+            <div class="qbar-row">
+              <span>${RESOURCE_LABELS[q.resourceType] || q.resourceType}${badge}</span>
+              <span class="muted">${fmtNum(used,0)} / ${fmtNum(limit,0)} · avail ${fmtNum(avail,0)}</span>
+            </div>
+            <div class="qbar-bg"><div class="qbar-fill ${fillCls}" style="width:${pct.toFixed(1)}%"></div></div>
+          </div>`;
+        }).join('')
+      : '<p class="muted" style="font-size:.75rem">No quota snapshots yet</p>';
+
+    const clsHtml = cls.length
+      ? `<div class="cluster-chips">${cls.map(c => {
+          const stale = c.lastHeartbeat && (Date.now() - new Date(c.lastHeartbeat)) > STALE_MS;
+          const badge = stale ? 'danger' : c.status === 'healthy' ? 'success' : 'secondary';
+          return `<span class="chip ${stale ? 'stale' : ''}">
+            <span class="badge ${badge}" style="font-size:.6rem">${c.status}</span>
+            ${esc((c.cloudProvider || '').toUpperCase())} ${esc(c.region)}
+            <span class="muted">${fmtAgo(c.lastHeartbeat)}</span>
+          </span>`;
+        }).join('')}</div>`
+      : '<p class="muted" style="font-size:.75rem">No clusters</p>';
+
+    return `<article class="card tenant-card">
+      <header>
+        <span style="font-weight:700">${esc(t.name)}</span>
+        <span class="badge">${esc(t.billingTier)}</span>
+        <span class="badge ${t.status === 'active' ? 'success' : 'secondary'}">${esc(t.status)}</span>
+        <span class="small-id">${t.id.slice(0, 8)}</span>
+      </header>
+      <div class="grid-2" style="margin-top:12px">
+        <div>${quotasHtml}</div>
+        <div>
+          <div class="muted" style="font-size:.72rem;margin-bottom:4px">CLUSTERS (${cls.length})</div>
+          ${clsHtml}
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+}
+
+// ── Tenants ──────────────────────────────────────────────────────────────────
+async function loadTenants() {
+  const { tenants: list } = await admin('ListTenants');
+  tenants = list || [];
+  renderTenantList();
+  syncTenantSelects();
+}
+
+function renderTenantList() {
+  const el = document.getElementById('tenant-list');
+  if (!tenants.length) { el.innerHTML = '<p class="muted">No tenants yet.</p>'; return; }
+  el.innerHTML = `<div class="table"><table>
+    <thead><tr><th>Name</th><th>Tier</th><th>Status</th><th>ID</th><th></th></tr></thead>
+    <tbody>${tenants.map(t => `<tr>
+      <td><strong>${esc(t.name)}</strong></td>
+      <td><span class="badge">${esc(t.billingTier)}</span></td>
+      <td><span class="badge ${t.status === 'active' ? 'success' : 'secondary'}">${esc(t.status)}</span></td>
+      <td class="small-id">${t.id.slice(0, 8)}</td>
+      <td><button class="outline small" data-variant="danger" onclick="deleteTenant('${t.id}','${esc(t.name)}')">Delete</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+async function deleteTenant(id, name) {
+  const ok = await confirmDialog(`Delete tenant "${name}"?`, 'This soft-deletes the tenant and hides it from all views. The Temporal accounting workflow will keep running until it naturally completes.');
+  if (!ok) return;
+  try {
+    await admin('DeleteTenant', { tenantId: id });
+    toast('Tenant deleted', name, 'success');
+    log(`✓ DeleteTenant "${name}" (${id.slice(0, 8)})`, 'warn');
+    // Remove from local state immediately
+    tenants = tenants.filter(t => t.id !== id);
+    clusters = clusters.filter(c => c.tenantId !== id);
+    renderTenantList();
+    syncTenantSelects();
+    syncClusterSelect();
+  } catch (e) {
+    toast('Delete failed', e.message, 'error');
+    log(`✗ DeleteTenant: ${e.message}`, 'err');
+  }
+}
+
+function syncTenantSelects() {
+  ['c-tenant', 'cr-tenant'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = tenants.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    if (prev && tenants.find(t => t.id === prev)) sel.value = prev;
+  });
+  const adj = document.getElementById('adj-tenant');
+  if (adj) {
+    const prev = adj.value;
+    adj.innerHTML = '<option value="">— select tenant —</option>' +
+      tenants.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    if (prev) adj.value = prev;
+  }
+}
+
+// ── Clusters ─────────────────────────────────────────────────────────────────
+async function loadClusters() {
+  if (!tenants.length) await loadTenants();
+  const groups = await Promise.all(tenants.map(t =>
+    admin('ListClusters', { tenantId: t.id })
+      .then(r => (r.clusters || []).map(c => ({ ...c, tenantName: t.name })))
+      .catch(() => [])
+  ));
+  clusters = groups.flat();
+  renderClusterList();
+  syncClusterSelect();
+}
+
+function renderClusterList() {
+  const el = document.getElementById('cluster-list');
+  if (!clusters.length) { el.innerHTML = '<p class="muted">No clusters yet.</p>'; return; }
+  el.innerHTML = `<div class="table"><table>
+    <thead><tr><th>Tenant</th><th>Provider</th><th>Region</th><th>Status</th><th>Last HB</th><th></th></tr></thead>
+    <tbody>${clusters.map(c => {
+      const stale = c.lastHeartbeat && (Date.now() - new Date(c.lastHeartbeat)) > STALE_MS;
+      const badge = stale ? 'danger' : c.status === 'healthy' ? 'success' : 'secondary';
+      return `<tr>
+        <td>${esc(c.tenantName)}</td>
+        <td>${esc((c.cloudProvider || '').toUpperCase())}</td>
+        <td>${esc(c.region)}</td>
+        <td><span class="badge ${badge}">${stale ? 'stale' : esc(c.status)}</span></td>
+        <td class="muted">${fmtAgo(c.lastHeartbeat)}</td>
+        <td><button class="outline small" data-variant="danger" onclick="deregisterCluster('${c.id}','${esc((c.cloudProvider||'').toUpperCase())} ${esc(c.region)}')">Deregister</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+async function deregisterCluster(id, label) {
+  const ok = await confirmDialog(`Deregister cluster "${label}"?`, 'Sets status to deregistered and records deregistered_at. The cluster will no longer appear in active lists.');
+  if (!ok) return;
+  try {
+    await admin('DeregisterCluster', { clusterId: id });
+    toast('Cluster deregistered', label, 'success');
+    log(`✓ DeregisterCluster ${label} (${id.slice(0, 8)})`, 'warn');
+    clusters = clusters.filter(c => c.id !== id);
+    // Also stop any scenarios using this cluster
+    scenarios.forEach((sc, i) => { if (sc.clusterId === id) stopScenario(i); });
+    renderClusterList();
+    syncClusterSelect();
+  } catch (e) {
+    toast('Deregister failed', e.message, 'error');
+    log(`✗ DeregisterCluster: ${e.message}`, 'err');
+  }
+}
+
+function syncClusterSelect() {
+  const sel = document.getElementById('sc-cluster');
+  if (!sel) return;
+  const prev = sel.value;
+  if (!clusters.length) {
+    sel.innerHTML = '<option value="">— register a cluster first —</option>';
+    return;
+  }
+  sel.innerHTML = clusters.map(c =>
+    `<option value="${c.id}">${esc(c.tenantName)} — ${esc((c.cloudProvider || '').toUpperCase())} ${esc(c.region)} (${c.id.slice(0, 8)})</option>`
+  ).join('');
+  if (prev && clusters.find(c => c.id === prev)) sel.value = prev;
+}
+
+// ── Scenarios ─────────────────────────────────────────────────────────────────
+function renderScenarios() {
+  const el = document.getElementById('scenario-list');
+  const running = scenarios.filter(s => s.timer).length;
+  const badge = document.getElementById('sc-running-badge');
+  badge.innerHTML = running > 0
+    ? `<span class="badge success" style="font-size:.7rem">${running} running</span>`
+    : '';
+
+  if (!scenarios.length) { el.innerHTML = '<p class="muted">No scenarios yet.</p>'; return; }
+  el.innerHTML = scenarios.map((sc, i) => {
+    const isRunning = !!sc.timer;
+    const c = clusters.find(x => x.id === sc.clusterId);
+    const clabel = c ? `${c.tenantName} · ${(c.cloudProvider || '').toUpperCase()} ${c.region}` : sc.clusterId.slice(0, 8);
+    const elapsed = sc.startedAt ? Math.floor((Date.now() - sc.startedAt) / 1000) : 0;
+    const seq = clusterSeq[sc.clusterId] || 0;
+    return `<article class="card sc-card ${isRunning ? 'sc-running' : ''}">
+      <div class="hstack">
+        <strong>${esc(sc.name)}</strong>
+        <span class="badge ${isRunning ? 'success' : 'secondary'}">${isRunning ? '▶ running' : '■ stopped'}</span>
+        <span class="muted" style="font-size:.72rem">${esc(clabel)}</span>
+        <span class="muted" style="font-size:.72rem">${sc.interval}ms</span>
+        ${isRunning ? `<span class="muted" style="font-size:.72rem">seq:${seq} t:${elapsed}s</span>` : ''}
+        <span style="margin-left:auto;display:flex;gap:4px">
+          ${isRunning
+            ? `<button class="outline small" data-variant="danger" onclick="stopScenario(${i})">■ Stop</button>`
+            : `<button class="outline small" onclick="startScenario(${i})">▶ Start</button>`
+          }
+          <button class="outline small" data-variant="danger" onclick="removeScenario(${i})">✕</button>
+        </span>
+      </div>
+      <div class="sc-meta">cpu: ${esc(sc.cpuExpr)} · mem: ${esc(sc.memExpr)} · nodes: ${esc(sc.nodesExpr)}</div>
+    </article>`;
+  }).join('');
+}
+
+function startScenario(i) {
+  const sc = scenarios[i];
+  if (!sc || sc.timer) return;
+  sc.startedAt = Date.now();
+  sc.timer = setInterval(() => runHeartbeat(i), sc.interval);
+  log(`▶ started "${sc.name}" on ${sc.clusterId.slice(0, 8)} every ${sc.interval}ms`, 'ok');
+  renderScenarios();
+}
+
+function stopScenario(i) {
+  const sc = scenarios[i];
+  if (!sc || !sc.timer) return;
+  clearInterval(sc.timer);
+  sc.timer = null;
+  sc.startedAt = null;
+  log(`■ stopped "${sc.name}"`, 'warn');
+  renderScenarios();
+}
+
+function removeScenario(i) {
+  stopScenario(i);
+  const name = scenarios[i].name;
+  scenarios.splice(i, 1);
+  log(`✕ removed scenario "${name}"`, 'info');
+  renderScenarios();
+}
+
+function stopAllScenarios() {
+  scenarios.forEach((_, i) => stopScenario(i));
+  toast('All scenarios stopped', `${scenarios.length} scenario(s) halted`, 'warning');
+}
+
+async function runHeartbeat(i) {
+  const sc = scenarios[i];
+  if (!sc) return;
+  const seq = (clusterSeq[sc.clusterId] = (clusterSeq[sc.clusterId] || 0) + 1);
+  const t   = sc.startedAt ? (Date.now() - sc.startedAt) / 1000 : 0;
+  try {
+    const cpu   = Math.max(0, Math.round(evalExpr(sc.cpuExpr,   seq, t)));
+    const mem   = Math.max(0, Math.round(evalExpr(sc.memExpr,   seq, t)));
+    const nodes = Math.max(0, Math.round(evalExpr(sc.nodesExpr, seq, t)));
+
+    const resp = await hb('Heartbeat', {
+      clusterId:            sc.clusterId,
+      sequenceNumber:       String(seq),
+      lastAckSequence:      String(clusterLastAck[sc.clusterId] || 0),
+      cpuMillisecondsDelta: String(cpu),
+      memoryMbSecondsDelta: String(mem),
+      activeNodes:          nodes,
+      timestamp:            new Date().toISOString(),
+    });
+    if (resp.ackSequence) clusterLastAck[sc.clusterId] = Number(resp.ackSequence);
+
+    const status = (resp.status || '').replace('STATUS_', '');
+    const lvl    = status.includes('EXCEEDED') ? 'err' : status.includes('WARNING') ? 'warn' : 'ok';
+    log(`[${sc.name}] seq=${seq} cpu=${fmtNum(cpu,0)} mem=${fmtNum(mem,0)} nodes=${nodes} → ${status || 'OK'}`, lvl);
+    if (seq % 20 === 0) renderScenarios();
+  } catch (e) {
+    log(`[${sc.name}] seq=${seq} ERROR: ${e.message}`, 'err');
+  }
+}
+
+function buildScenario() {
+  const clusterId = document.getElementById('sc-cluster').value;
+  if (!clusterId) throw new Error('No cluster selected — register one first');
+  const sc = {
+    id:        crypto.randomUUID(),
+    name:      document.getElementById('sc-name').value.trim(),
+    clusterId,
+    interval:  Number(document.getElementById('sc-interval').value),
+    cpuExpr:   document.getElementById('sc-cpu').value.trim(),
+    memExpr:   document.getElementById('sc-mem').value.trim(),
+    nodesExpr: document.getElementById('sc-nodes').value.trim(),
+    timer:     null,
+    startedAt: null,
+  };
+  // Validate expressions before accepting
+  try { evalExpr(sc.cpuExpr,   1, 0); } catch (e) { throw new Error(`CPU expr: ${e.message}`); }
+  try { evalExpr(sc.memExpr,   1, 0); } catch (e) { throw new Error(`Mem expr: ${e.message}`); }
+  try { evalExpr(sc.nodesExpr, 1, 0); } catch (e) { throw new Error(`Nodes expr: ${e.message}`); }
+  return sc;
+}
+
+// ── Credits ──────────────────────────────────────────────────────────────────
+async function loadAdjustments() {
+  const tenantId = document.getElementById('adj-tenant').value;
+  const el = document.getElementById('adj-list');
+  if (!tenantId) { el.innerHTML = '<p class="muted">Select a tenant above.</p>'; return; }
+  try {
+    const { adjustments } = await admin('ListCreditAdjustments', { tenantId });
+    if (!adjustments || !adjustments.length) {
+      el.innerHTML = '<p class="muted">No adjustments yet.</p>';
+      return;
+    }
+    el.innerHTML = `<div class="table"><table>
+      <thead><tr><th>Resource</th><th>Amount</th><th>Reason</th><th>When</th></tr></thead>
+      <tbody>${adjustments.map(a => `<tr>
+        <td>${esc(a.resourceType)}</td>
+        <td class="mono">+${fmtNum(Number(a.amount || 0), 0)}</td>
+        <td>${esc(a.reason || '—')}</td>
+        <td class="muted">${a.createdAt ? new Date(a.createdAt).toLocaleTimeString() : '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch (e) {
+    el.innerHTML = `<p class="danger-text">${esc(e.message)}</p>`;
+  }
+}
+
+// ── Form: Register Tenant ─────────────────────────────────────────────────────
+document.getElementById('form-tenant').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-tenant');
+  btn.disabled = true; btn.textContent = 'Registering…';
+  try {
+    const body = {
+      name:        document.getElementById('t-name').value.trim(),
+      billingTier: document.getElementById('t-tier').value,
+    };
+    const cpu   = Number(document.getElementById('t-cpu').value);
+    const mem   = Number(document.getElementById('t-mem').value);
+    const nodes = Number(document.getElementById('t-nodes').value);
+    if (cpu   > 0) body.cpuHoursCredits      = cpu;
+    if (mem   > 0) body.memoryGbHoursCredits = mem;
+    if (nodes > 0) body.activeNodesLimit     = nodes;
+
+    const { tenantId } = await prov('RegisterTenant', body);
+    toast('Tenant registered', `${body.name} · ${body.billingTier}`);
+    log(`✓ RegisterTenant "${body.name}" [${body.billingTier}] → ${tenantId.slice(0, 8)}`, 'ok');
+    e.target.reset();
+    await loadTenants();
+  } catch (err) {
+    toast('Registration failed', err.message, 'error');
+    log(`✗ RegisterTenant: ${err.message}`, 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Register';
+  }
+});
+
+// ── Form: Register Cluster ────────────────────────────────────────────────────
+document.getElementById('form-cluster').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-cluster');
+  btn.disabled = true; btn.textContent = 'Registering…';
+  try {
+    const body = {
+      tenantId:      document.getElementById('c-tenant').value,
+      cloudProvider: document.getElementById('c-provider').value,
+      region:        document.getElementById('c-region').value.trim(),
+    };
+    if (!body.tenantId) throw new Error('Select a tenant first');
+    const { clusterId } = await prov('RegisterCluster', body);
+    toast('Cluster registered', `${body.cloudProvider.toUpperCase()} ${body.region}`);
+    log(`✓ RegisterCluster ${body.cloudProvider} ${body.region} → ${clusterId.slice(0, 8)}`, 'ok');
+    e.target.reset();
+    await loadClusters();
+  } catch (err) {
+    toast('Registration failed', err.message, 'error');
+    log(`✗ RegisterCluster: ${err.message}`, 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Register';
+  }
+});
+
+// ── Form: Add Scenario ────────────────────────────────────────────────────────
+document.getElementById('form-scenario').addEventListener('submit', e => {
+  e.preventDefault();
+  try {
+    const sc = buildScenario();
+    scenarios.push(sc);
+    startScenario(scenarios.length - 1);
+    toast('Scenario started', sc.name);
+    e.target.reset();
+  } catch (err) {
+    toast('Invalid scenario', err.message, 'error');
+    log(`✗ Scenario: ${err.message}`, 'err');
+  }
+});
+
+document.getElementById('btn-add-paused').addEventListener('click', () => {
+  const form = document.getElementById('form-scenario');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+  try {
+    const sc = buildScenario();
+    scenarios.push(sc);
+    renderScenarios();
+    toast('Scenario added', sc.name + ' (paused)');
+    log(`+ added scenario "${sc.name}" (paused)`, 'info');
+    form.reset();
+  } catch (err) {
+    toast('Invalid scenario', err.message, 'error');
+    log(`✗ Scenario: ${err.message}`, 'err');
+  }
+});
+
+// ── Form: Issue Credit ────────────────────────────────────────────────────────
+document.getElementById('form-credit').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-credit');
+  btn.disabled = true; btn.textContent = 'Issuing…';
+  try {
+    const tenantId    = document.getElementById('cr-tenant').value;
+    const resourceType = document.getElementById('cr-resource').value;
+    const amount      = Number(document.getElementById('cr-amount').value);
+    const reason      = document.getElementById('cr-reason').value.trim();
+    if (!tenantId) throw new Error('Select a tenant');
+
+    const { transferId, quotas } = await admin('IssueTenantCredit', {
+      tenantId, resourceType, amount: String(amount), reason,
+    });
+    toast('Credit issued', `+${fmtNum(amount, 0)} ${resourceType}`);
+    log(`✓ IssueTenantCredit ${resourceType} +${fmtNum(amount, 0)} → ${transferId.slice(0, 8)}`, 'ok');
+    if (quotas) {
+      quotas.forEach(q => {
+        const avail = fmtNum(Number(q.available || 0), 0);
+        const status = (q.status || '').replace('STATUS_', '');
+        log(`  ${q.resourceType}: avail=${avail} [${status}]`, 'info');
+        if (q.status === 'STATUS_QUOTA_EXCEEDED') toast(`${q.resourceType} still exceeded`, `avail: ${avail}`, 'error');
+        else if (q.status === 'STATUS_QUOTA_WARNING') toast(`${q.resourceType} warning`, `avail: ${avail}`, 'warning');
+      });
+    }
+  } catch (err) {
+    toast('Failed', err.message, 'error');
+    log(`✗ IssueTenantCredit: ${err.message}`, 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Issue Credit';
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    await loadTenants();
+    await loadClusters();
+    await pollDashboard();
+  } catch (e) {
+    document.getElementById('hdr-err').style.display = '';
+    document.getElementById('hdr-err').textContent = 'init: ' + e.message;
+  }
+})();
+
+setInterval(pollDashboard, 5_000);
+setInterval(() => { if (scenarios.some(s => s.timer)) renderScenarios(); }, 5_000);
+
+// Expose functions used in inline onclick attributes
+Object.assign(window, {
+  loadTenants, loadClusters, loadAdjustments,
+  deleteTenant, deregisterCluster,
+  startScenario, stopScenario, removeScenario, stopAllScenarios,
+  clearLog,
+  _sim: { scenarios, clusters, tenants, clusterSeq },
+});
+
+}); // DOMContentLoaded
+</script>
+</body>
+</html>

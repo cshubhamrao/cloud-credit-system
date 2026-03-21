@@ -21,6 +21,12 @@ service AdminService {
 
   // ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
   rpc ListCreditAdjustments(ListCreditAdjustmentsRequest) returns (ListCreditAdjustmentsResponse);
+
+  // DeleteTenant soft-deletes a tenant (status → deregistered, sets deleted_at).
+  rpc DeleteTenant(DeleteTenantRequest) returns (DeleteTenantResponse);
+
+  // DeregisterCluster soft-deregisters a workload cluster (status → deregistered, sets deregistered_at).
+  rpc DeregisterCluster(DeregisterClusterRequest) returns (DeregisterClusterResponse);
 }
 
 message IssueTenantCreditRequest {
@@ -73,3 +79,15 @@ message CreditAdjustmentEntry {
 message ListCreditAdjustmentsResponse {
   repeated CreditAdjustmentEntry adjustments = 1;
 }
+
+message DeleteTenantRequest {
+  string tenant_id = 1;
+}
+
+message DeleteTenantResponse {}
+
+message DeregisterClusterRequest {
+  string cluster_id = 1;
+}
+
+message DeregisterClusterResponse {}

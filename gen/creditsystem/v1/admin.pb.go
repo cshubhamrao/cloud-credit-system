@@ -569,6 +569,166 @@ func (x *ListCreditAdjustmentsResponse) GetAdjustments() []*CreditAdjustmentEntr
 	return nil
 }
 
+type DeleteTenantRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTenantRequest) Reset() {
+	*x = DeleteTenantRequest{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTenantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTenantRequest) ProtoMessage() {}
+
+func (x *DeleteTenantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTenantRequest.ProtoReflect.Descriptor instead.
+func (*DeleteTenantRequest) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DeleteTenantRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+type DeleteTenantResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTenantResponse) Reset() {
+	*x = DeleteTenantResponse{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTenantResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTenantResponse) ProtoMessage() {}
+
+func (x *DeleteTenantResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTenantResponse.ProtoReflect.Descriptor instead.
+func (*DeleteTenantResponse) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{12}
+}
+
+type DeregisterClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeregisterClusterRequest) Reset() {
+	*x = DeregisterClusterRequest{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeregisterClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeregisterClusterRequest) ProtoMessage() {}
+
+func (x *DeregisterClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeregisterClusterRequest.ProtoReflect.Descriptor instead.
+func (*DeregisterClusterRequest) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DeregisterClusterRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+type DeregisterClusterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeregisterClusterResponse) Reset() {
+	*x = DeregisterClusterResponse{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeregisterClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeregisterClusterResponse) ProtoMessage() {}
+
+func (x *DeregisterClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeregisterClusterResponse.ProtoReflect.Descriptor instead.
+func (*DeregisterClusterResponse) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{14}
+}
+
 var File_creditsystem_v1_admin_proto protoreflect.FileDescriptor
 
 const file_creditsystem_v1_admin_proto_rawDesc = "" +
@@ -606,13 +766,22 @@ const file_creditsystem_v1_admin_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\tR\tcreatedAt\"i\n" +
 	"\x1dListCreditAdjustmentsResponse\x12H\n" +
-	"\vadjustments\x18\x01 \x03(\v2&.creditsystem.v1.CreditAdjustmentEntryR\vadjustments2\x92\x04\n" +
+	"\vadjustments\x18\x01 \x03(\v2&.creditsystem.v1.CreditAdjustmentEntryR\vadjustments\"2\n" +
+	"\x13DeleteTenantRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\"\x16\n" +
+	"\x14DeleteTenantResponse\"9\n" +
+	"\x18DeregisterClusterRequest\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tR\tclusterId\"\x1b\n" +
+	"\x19DeregisterClusterResponse2\xdb\x05\n" +
 	"\fAdminService\x12j\n" +
 	"\x11IssueTenantCredit\x12).creditsystem.v1.IssueTenantCreditRequest\x1a*.creditsystem.v1.IssueTenantCreditResponse\x12g\n" +
 	"\x10ListTenantQuotas\x12(.creditsystem.v1.ListTenantQuotasRequest\x1a).creditsystem.v1.ListTenantQuotasResponse\x12X\n" +
 	"\vListTenants\x12#.creditsystem.v1.ListTenantsRequest\x1a$.creditsystem.v1.ListTenantsResponse\x12[\n" +
 	"\fListClusters\x12$.creditsystem.v1.ListClustersRequest\x1a%.creditsystem.v1.ListClustersResponse\x12v\n" +
-	"\x15ListCreditAdjustments\x12-.creditsystem.v1.ListCreditAdjustmentsRequest\x1a..creditsystem.v1.ListCreditAdjustmentsResponseB\xcd\x01\n" +
+	"\x15ListCreditAdjustments\x12-.creditsystem.v1.ListCreditAdjustmentsRequest\x1a..creditsystem.v1.ListCreditAdjustmentsResponse\x12[\n" +
+	"\fDeleteTenant\x12$.creditsystem.v1.DeleteTenantRequest\x1a%.creditsystem.v1.DeleteTenantResponse\x12j\n" +
+	"\x11DeregisterCluster\x12).creditsystem.v1.DeregisterClusterRequest\x1a*.creditsystem.v1.DeregisterClusterResponseB\xcd\x01\n" +
 	"\x13com.creditsystem.v1B\n" +
 	"AdminProtoP\x01ZMgithub.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1\xa2\x02\x03CXX\xaa\x02\x0fCreditsystem.V1\xca\x02\x0fCreditsystem\\V1\xe2\x02\x1bCreditsystem\\V1\\GPBMetadata\xea\x02\x10Creditsystem::V1b\x06proto3"
 
@@ -628,7 +797,7 @@ func file_creditsystem_v1_admin_proto_rawDescGZIP() []byte {
 	return file_creditsystem_v1_admin_proto_rawDescData
 }
 
-var file_creditsystem_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_creditsystem_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_creditsystem_v1_admin_proto_goTypes = []any{
 	(*IssueTenantCreditRequest)(nil),      // 0: creditsystem.v1.IssueTenantCreditRequest
 	(*IssueTenantCreditResponse)(nil),     // 1: creditsystem.v1.IssueTenantCreditResponse
@@ -641,28 +810,36 @@ var file_creditsystem_v1_admin_proto_goTypes = []any{
 	(*ListCreditAdjustmentsRequest)(nil),  // 8: creditsystem.v1.ListCreditAdjustmentsRequest
 	(*CreditAdjustmentEntry)(nil),         // 9: creditsystem.v1.CreditAdjustmentEntry
 	(*ListCreditAdjustmentsResponse)(nil), // 10: creditsystem.v1.ListCreditAdjustmentsResponse
-	(*QuotaInfo)(nil),                     // 11: creditsystem.v1.QuotaInfo
-	(*TenantSummary)(nil),                 // 12: creditsystem.v1.TenantSummary
-	(*ClusterSummary)(nil),                // 13: creditsystem.v1.ClusterSummary
+	(*DeleteTenantRequest)(nil),           // 11: creditsystem.v1.DeleteTenantRequest
+	(*DeleteTenantResponse)(nil),          // 12: creditsystem.v1.DeleteTenantResponse
+	(*DeregisterClusterRequest)(nil),      // 13: creditsystem.v1.DeregisterClusterRequest
+	(*DeregisterClusterResponse)(nil),     // 14: creditsystem.v1.DeregisterClusterResponse
+	(*QuotaInfo)(nil),                     // 15: creditsystem.v1.QuotaInfo
+	(*TenantSummary)(nil),                 // 16: creditsystem.v1.TenantSummary
+	(*ClusterSummary)(nil),                // 17: creditsystem.v1.ClusterSummary
 }
 var file_creditsystem_v1_admin_proto_depIdxs = []int32{
-	11, // 0: creditsystem.v1.IssueTenantCreditResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
-	11, // 1: creditsystem.v1.ListTenantQuotasResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
-	12, // 2: creditsystem.v1.ListTenantsResponse.tenants:type_name -> creditsystem.v1.TenantSummary
-	13, // 3: creditsystem.v1.ListClustersResponse.clusters:type_name -> creditsystem.v1.ClusterSummary
+	15, // 0: creditsystem.v1.IssueTenantCreditResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
+	15, // 1: creditsystem.v1.ListTenantQuotasResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
+	16, // 2: creditsystem.v1.ListTenantsResponse.tenants:type_name -> creditsystem.v1.TenantSummary
+	17, // 3: creditsystem.v1.ListClustersResponse.clusters:type_name -> creditsystem.v1.ClusterSummary
 	9,  // 4: creditsystem.v1.ListCreditAdjustmentsResponse.adjustments:type_name -> creditsystem.v1.CreditAdjustmentEntry
 	0,  // 5: creditsystem.v1.AdminService.IssueTenantCredit:input_type -> creditsystem.v1.IssueTenantCreditRequest
 	2,  // 6: creditsystem.v1.AdminService.ListTenantQuotas:input_type -> creditsystem.v1.ListTenantQuotasRequest
 	4,  // 7: creditsystem.v1.AdminService.ListTenants:input_type -> creditsystem.v1.ListTenantsRequest
 	6,  // 8: creditsystem.v1.AdminService.ListClusters:input_type -> creditsystem.v1.ListClustersRequest
 	8,  // 9: creditsystem.v1.AdminService.ListCreditAdjustments:input_type -> creditsystem.v1.ListCreditAdjustmentsRequest
-	1,  // 10: creditsystem.v1.AdminService.IssueTenantCredit:output_type -> creditsystem.v1.IssueTenantCreditResponse
-	3,  // 11: creditsystem.v1.AdminService.ListTenantQuotas:output_type -> creditsystem.v1.ListTenantQuotasResponse
-	5,  // 12: creditsystem.v1.AdminService.ListTenants:output_type -> creditsystem.v1.ListTenantsResponse
-	7,  // 13: creditsystem.v1.AdminService.ListClusters:output_type -> creditsystem.v1.ListClustersResponse
-	10, // 14: creditsystem.v1.AdminService.ListCreditAdjustments:output_type -> creditsystem.v1.ListCreditAdjustmentsResponse
-	10, // [10:15] is the sub-list for method output_type
-	5,  // [5:10] is the sub-list for method input_type
+	11, // 10: creditsystem.v1.AdminService.DeleteTenant:input_type -> creditsystem.v1.DeleteTenantRequest
+	13, // 11: creditsystem.v1.AdminService.DeregisterCluster:input_type -> creditsystem.v1.DeregisterClusterRequest
+	1,  // 12: creditsystem.v1.AdminService.IssueTenantCredit:output_type -> creditsystem.v1.IssueTenantCreditResponse
+	3,  // 13: creditsystem.v1.AdminService.ListTenantQuotas:output_type -> creditsystem.v1.ListTenantQuotasResponse
+	5,  // 14: creditsystem.v1.AdminService.ListTenants:output_type -> creditsystem.v1.ListTenantsResponse
+	7,  // 15: creditsystem.v1.AdminService.ListClusters:output_type -> creditsystem.v1.ListClustersResponse
+	10, // 16: creditsystem.v1.AdminService.ListCreditAdjustments:output_type -> creditsystem.v1.ListCreditAdjustmentsResponse
+	12, // 17: creditsystem.v1.AdminService.DeleteTenant:output_type -> creditsystem.v1.DeleteTenantResponse
+	14, // 18: creditsystem.v1.AdminService.DeregisterCluster:output_type -> creditsystem.v1.DeregisterClusterResponse
+	12, // [12:19] is the sub-list for method output_type
+	5,  // [5:12] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -680,7 +857,7 @@ func file_creditsystem_v1_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_creditsystem_v1_admin_proto_rawDesc), len(file_creditsystem_v1_admin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

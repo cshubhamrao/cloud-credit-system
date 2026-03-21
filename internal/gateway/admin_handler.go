@@ -199,6 +199,38 @@ func (h *AdminHandler) ListCreditAdjustments(
 	return connect.NewResponse(&creditsystemv1.ListCreditAdjustmentsResponse{Adjustments: entries}), nil
 }
 
+// DeleteTenant soft-deletes a tenant (status → deregistered, sets deleted_at).
+func (h *AdminHandler) DeleteTenant(
+	ctx context.Context,
+	req *connect.Request[creditsystemv1.DeleteTenantRequest],
+) (*connect.Response[creditsystemv1.DeleteTenantResponse], error) {
+	tenantUUID, err := uuid.Parse(req.Msg.TenantId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid tenant ID: %w", err))
+	}
+	if err := sqlcgen.New(h.db).DeleteTenant(ctx, tenantUUID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("DeleteTenant: %w", err))
+	}
+	h.log.Info("tenant deleted", "tenant", req.Msg.TenantId)
+	return connect.NewResponse(&creditsystemv1.DeleteTenantResponse{}), nil
+}
+
+// DeregisterCluster soft-deregisters a workload cluster (status → deregistered, sets deregistered_at).
+func (h *AdminHandler) DeregisterCluster(
+	ctx context.Context,
+	req *connect.Request[creditsystemv1.DeregisterClusterRequest],
+) (*connect.Response[creditsystemv1.DeregisterClusterResponse], error) {
+	clusterUUID, err := uuid.Parse(req.Msg.ClusterId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid cluster ID: %w", err))
+	}
+	if err := sqlcgen.New(h.db).DeregisterCluster(ctx, clusterUUID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("DeregisterCluster: %w", err))
+	}
+	h.log.Info("cluster deregistered", "cluster", req.Msg.ClusterId)
+	return connect.NewResponse(&creditsystemv1.DeregisterClusterResponse{}), nil
+}
+
 // ListClusters returns active workload clusters for a tenant.
 func (h *AdminHandler) ListClusters(
 	ctx context.Context,

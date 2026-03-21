@@ -14,8 +14,8 @@ import (
 	"github.com/cshubhamrao/cloud-credit-system/internal/db/sqlcgen"
 )
 
-//go:embed page.html
-var pageHTML []byte
+//go:embed simulator.html
+var simHTML []byte
 
 // HeartbeatMetrics is satisfied by *gateway.HeartbeatHandler.
 type HeartbeatMetrics interface {
@@ -52,9 +52,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveStats(w, r)
 	case "/api/ui/report":
 		h.serveReport(w, r)
+	case "/ui":
+		http.Redirect(w, r, "/sim", http.StatusMovedPermanently)
 	default:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(pageHTML)
+		_, _ = w.Write(simHTML)
 	}
 }
 
