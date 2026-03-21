@@ -1,6 +1,10 @@
 # ─── Binaries ────────────────────────────────────────────────────────────────
 bin/
 .tools/
+# Root-level binaries (use `make build` → bin/ instead)
+/server
+/worker
+/simulator
 *.exe
 *.exe~
 *.dll

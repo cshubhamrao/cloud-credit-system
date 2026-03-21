@@ -60,8 +60,11 @@ internal/
     workflow_accounting.go    ← TenantAccountingWorkflow (long-running, one per tenant)
     workflow_provisioning.go  ← TenantProvisioningWorkflow, RegisterClusterWorkflow
     worker.go             ← NewClient, StartWorker
+  compress/               ← zstd ConnectRPC codec adapter (faster than gzip for small protos)
   gateway/                ← ConnectRPC handlers, stream manager, dedup cache
+  webui/                  ← Embedded web UI handler (page.html served by server)
 cmd/server/               ← Server entrypoint (gateway + Temporal worker)
+cmd/worker/               ← Standalone Temporal worker (no HTTP gateway)
 cmd/simulator/            ← Bubbletea TUI demo simulator
 sql/migrations/           ← PostgreSQL schema
 sql/queries/              ← sqlc query files
@@ -84,8 +87,10 @@ sql/queries/              ← sqlc query files
 make docker-up
 ```
 
-Starts: PostgreSQL 16, Temporal (auto-setup), TigerBeetle 0.16.11.
+Starts: PostgreSQL 16, Temporal (auto-setup, 8h retention), TigerBeetle 0.16.11, Valkey.
 Temporal UI available at http://localhost:8088.
+
+> ⚠️ `make docker-down` passes `-v` — **destroys all volumes** (Postgres + TigerBeetle data).
 
 ### 2. Generate code
 
@@ -104,9 +109,11 @@ make build
 ### 4. Run server
 
 ```bash
-make run
+make run          # gateway + embedded Temporal worker
 # or
 ./bin/server
+
+make run-worker   # standalone Temporal worker only (no HTTP gateway)
 ```
 
 ### 5. Run demo simulator
