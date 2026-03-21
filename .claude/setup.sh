@@ -3,6 +3,9 @@
 # Prepares the Go workspace so the project can be built and worked on.
 set -euo pipefail
 
+# Ensure we're in the project root (script lives in .claude/)
+cd "$(dirname "$0")/.."
+
 echo "==> Loading environment..."
 if [ -f .env ]; then
   set -a; source .env; set +a
