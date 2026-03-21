@@ -1,5 +1,8 @@
 # BYOC Cloud Credit System — Go PoC Implementation Plan
 
+**Status: COMPLETE** — All 5 phases implemented. Build is clean (`go build ./...` passes).
+Generated code (`gen/`, `internal/db/sqlcgen/`) requires `make generate` before building from scratch.
+
 ## Context
 
 This is a greenfield PoC for a BYOC (Bring-Your-Own-Cloud) resource accounting and quota enforcement system. The goal is to prove to stakeholders that:
@@ -83,16 +86,15 @@ cloud-credit-system/
 │   │   ├── client.go                # TigerBeetle client wrapper
 │   │   ├── accounts.go              # Create operator/tenant_quota/sink accounts
 │   │   ├── transfers.go             # Build usage/allocation/adjustment transfers
-│   │   └── ids.go                   # Deterministic ID generation (SHA-256 based)
-│   ├── temporal/
-│   │   ├── workflows/
-│   │   │   ├── tenant_accounting.go # Core: heartbeat batching, TB flush, dedup
-│   │   │   └── tenant_provisioning.go
-│   │   ├── activities/
-│   │   │   ├── tb_activities.go     # SubmitTBBatch, CreateTenantTBAccounts
-│   │   │   └── pg_activities.go     # UpdateQuotaSnapshots, InsertTenant
-│   │   ├── signals.go               # HeartbeatSignal, QuotaAdjustmentSignal, etc.
-│   │   └── worker.go               # Temporal worker setup
+│   │   └── ids.go                   # Deterministic ID generation (blake3)
+│   ├── accounting/                  # Flat package — no sub-packages, no import cycles
+│   │   ├── signals.go               # HeartbeatSignal, QuotaAdjustmentSignal, signal/query name constants
+│   │   ├── activities_tb.go         # TBActivities: SubmitTBBatch, CreateTenantTBAccounts, SubmitAllocationTransfers
+│   │   ├── activities_pg.go         # PGActivities: InsertTenant, InsertCluster, InsertTBAccountMapping, etc.
+│   │   ├── activity_refs.go         # Nil pointer stubs for type-safe workflow.ExecuteActivity references
+│   │   ├── workflow_accounting.go   # TenantAccountingWorkflow (long-running, one per tenant)
+│   │   ├── workflow_provisioning.go # TenantProvisioningWorkflow, RegisterClusterWorkflow
+│   │   └── worker.go                # NewClient, StartWorker
 │   └── gateway/
 │       ├── heartbeat_handler.go     # ConnectRPC HeartbeatService (bidi stream + unary fallback)
 │       ├── stream_manager.go        # Per-cluster stream tracking, send loop, connection map
@@ -115,23 +117,34 @@ cloud-credit-system/
 ## Phased Build Order
 
 ### Phase 0: Scaffolding & Infrastructure
-**Files**: `go.mod`, `Makefile`, `docker-compose.yml`, `buf.yaml`, `buf.gen.yaml`, `scripts/*`
+**Files**: `go.mod`, `Makefile`, `docker-compose.yml`, `buf.yaml` (v2), `buf.gen.yaml` (v2), `scripts/*`
 
-- Docker Compose: PostgreSQL 16, `temporalio/auto-setup`, TigerBeetle
-- Go 1.22+, buf for proto codegen, sqlc for SQL codegen
-- Makefile targets: `proto-gen`, `sqlc-gen`, `build`, `test`, `run`, `docker-up`, `simulate`
+- Docker Compose: PostgreSQL 16, `temporalio/auto-setup:1.24.2`, TigerBeetle 0.16.11
+- Go 1.24, buf v2 for proto codegen (remote plugins), sqlc for SQL codegen
+- buf config: `buf.yaml` v2 with `modules[].path = proto`; `buf.gen.yaml` v2 with `inputs[].directory = proto`
+- Makefile targets: `proto-gen`, `sqlc-gen`, `generate`, `build`, `test`, `run`, `docker-up`, `simulate`, `demo`
 
-**Key deps**: `connectrpc.com/connect`, `github.com/tigerbeetle/tigerbeetle-go`, `go.temporal.io/sdk`, `github.com/jackc/pgx/v5`, `google.golang.org/protobuf`, `github.com/google/uuid`, `golang.org/x/net/http2/h2c`
+**Key deps**: `connectrpc.com/connect v1.x`, `github.com/tigerbeetle/tigerbeetle-go v0.16.11`,
+`go.temporal.io/sdk v1.33.x`, `github.com/jackc/pgx/v5 v5.x`, `google.golang.org/protobuf v1.36.x`,
+`github.com/google/uuid v1.6.x`, `golang.org/x/net` (h2c), `github.com/zeebo/blake3` (fast hash for transfer IDs)
 
-**Verify**: `docker compose up -d` starts all services, `go build ./...` compiles
+> Use `@latest` for all `go get` commands — never pin pseudo-versions manually. Always run `go mod tidy` after adding deps.
+
+**Verify**: `docker compose up -d` starts all services, `make generate && go build ./...` compiles
 
 ### Phase 1: Domain + Protobuf + Database
-**Files**: `internal/domain/*`, `proto/**/*.proto`, `sql/*`, `internal/db/*`
+**Files**: `internal/domain/*`, `proto/creditsystem/v1/*.proto`, `sql/*`, `internal/db/*`
+**Generated**: `gen/creditsystem/v1/` (buf), `internal/db/sqlcgen/` (sqlc)
 
 Domain constants:
 - 3 resource types with ledger IDs
-- Transfer codes: 100 (QUOTA_ALLOCATION), 101 (QUOTA_ADJUSTMENT), 200 (USAGE_RECORD)
+- Transfer codes: 100 (QUOTA_ALLOCATION), 101 (QUOTA_ADJUSTMENT), 102 (SURGE_PACK_CREDIT), 200 (USAGE_RECORD)
 - Account codes: 1 (operator), 2 (tenant_quota), 3 (sink)
+- Status enum: STATUS_UNSPECIFIED=0, STATUS_OK=1, STATUS_QUOTA_WARNING=2, STATUS_QUOTA_EXCEEDED=3
+
+Proto management: buf v2 BSR module `buf.build/cshubhamrao/cloud-credit-system`.
+Run `buf dep update` in project root to refresh `buf.lock`.
+Run `buf lint` to validate; `buf generate` to regenerate Go code.
 
 Protobuf:
 - `HeartbeatService`: `HeartbeatStream(stream HeartbeatRequest) returns (stream HeartbeatResponse)` + `Heartbeat` unary fallback
@@ -148,7 +161,7 @@ PostgreSQL (PoC subset):
 ### Phase 2: TigerBeetle Integration
 **Files**: `internal/ledger/*`
 
-- `ids.go`: `DeriveTransferID(clusterID, seqNum, resourceType) → Uint128` via SHA-256 truncation
+- `ids.go`: `DeriveTransferID(clusterID, seqNum, ledgerID) → Uint128` via blake3 (non-crypto fast hash — IDs carry no secret)
 - `accounts.go`: Create global operator/sink per ledger + tenant_quota accounts with `DebitsMustNotExceedCredits | History` flags
 - `transfers.go`: Build usage transfers (code=200), allocation transfers (code=100), adjustment transfers (code=101). Submit batch, handle `exceeds_credits` result per-transfer
 - `client.go`: TigerBeetle client wrapper
@@ -156,7 +169,15 @@ PostgreSQL (PoC subset):
 **Verify**: Integration tests against real TB — create accounts, allocate quota, record usage, verify balance, exhaust quota and confirm rejection, verify idempotent duplicate handling
 
 ### Phase 3: Temporal Workflows & Activities
-**Files**: `internal/temporal/*`
+**Files**: `internal/accounting/*`
+
+> **Package name**: `internal/accounting` (not `internal/temporal`) to avoid confusion with the `go.temporal.io/sdk` import path.
+
+> **Flat package**: Everything lives directly in `internal/accounting/` — no sub-packages, no import cycles. Signal types, activities, workflows, and worker setup are all `package accounting`. This is the idiomatic Temporal Go pattern (mirrors how temporal/samples-go structures single-domain apps).
+
+> **Activity typing pattern**: Register by struct (`w.RegisterActivity(acts)`), call via nil pointer method values (`workflow.ExecuteActivity(ctx, tbActivities.SubmitTBBatch, input)`). The SDK resolves method names via reflection — no strings needed. See `workflows/activity_refs.go`.
+
+> **pgx + sqlc bridge**: `sqlcgen.DBTX` uses `database/sql` interfaces. `pgxpool.Pool` uses pgx-native interfaces. Bridge: `db := stdlib.OpenDBFromPool(pool)` from `github.com/jackc/pgx/v5/stdlib`.
 
 **TenantAccountingWorkflow** (the core):
 - State: `curBatch []HeartbeatSignal`, `processedSeqs map[string]uint64`, `flushInterval = 30s`
@@ -235,7 +256,13 @@ This is the stakeholder-facing artifact. The simulator is a **terminal UI applic
 
 #### Simulator Architecture
 
+> **Real tenant behavior**: The simulator communicates with the control plane exactly as a real tenant agent would. All ConnectRPC calls are live; quota bars update from real `HeartbeatResponse` data; the idempotency proof sends duplicate sequence numbers on the real bidi stream.
+
 `cmd/simulator/main.go`:
+- `ClusterSim` struct per cluster: `exhaustCh chan struct{}` (closed to trigger step 4 ramp-up), `replayCh chan uint64` (inject old seqs for step 6)
+- Recv goroutine reads real `HeartbeatResponse`, sends `quotaUpdateMsg`/`eventMsg` bubbletea messages
+- `stepExhaust`: closes `simA.exhaustCh` → cluster A sends 5-10x CPU delta until hard limit hit
+- `stepIdempotency`: sends 3 recent seqs to `simA.replayCh` → actually replayed on live stream
 - Bubbletea app setup, connect to server, initialize UI model
 
 `cmd/simulator/ui.go`:
