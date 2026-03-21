@@ -11,7 +11,7 @@ elif [ -f .env.example ]; then
 fi
 
 echo "==> Downloading Go modules..."
-go mod download
+go mod download all
 
 echo "==> Building project..."
 make build
