@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package creditsystem.v1;
+
+option go_package = "github.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1";
+
+service ProvisioningService {
+  // RegisterTenant creates a new tenant, provisions TigerBeetle quota accounts,
+  // loads initial plan credits, and starts the TenantAccountingWorkflow.
+  rpc RegisterTenant(RegisterTenantRequest) returns (RegisterTenantResponse);
+
+  // RegisterCluster registers a workload cluster and signals the tenant workflow.
+  rpc RegisterCluster(RegisterClusterRequest) returns (RegisterClusterResponse);
+}
+
+message RegisterTenantRequest {
+  string name = 1;
+  string billing_tier = 2;  // "free" | "starter" | "pro" | "enterprise"
+
+  // Initial quota amounts per resource (credits).
+  // If omitted, defaults from the billing_tier are applied.
+  int64 cpu_hours_credits = 3;
+  int64 memory_gb_hours_credits = 4;
+  int64 active_nodes_limit = 5;
+}
+
+message RegisterTenantResponse {
+  string tenant_id = 1;
+}
+
+message RegisterClusterRequest {
+  string tenant_id = 1;
+  string cloud_provider = 2;  // "aws" | "gcp" | "azure"
+  string region = 3;
+}
+
+message RegisterClusterResponse {
+  string cluster_id = 1;
+}

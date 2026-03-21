@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package creditsystem.v1;
+
+import "google/protobuf/timestamp.proto";
+import "creditsystem/v1/common.proto";
+
+option go_package = "github.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1";
+
+service HeartbeatService {
+  // Primary: bidirectional stream between workload cluster agent and control plane.
+  // The send direction carries heartbeat metrics; the receive direction carries
+  // async ACKs, quota status, and enforcement commands.
+  rpc HeartbeatStream(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+
+  // Fallback: unary for environments that cannot maintain streaming connections.
+  // Commands piggyback on the response at the cost of up to one heartbeat interval
+  // of additional enforcement latency.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// HeartbeatRequest is sent from workload cluster to control plane.
+message HeartbeatRequest {
+  string cluster_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Point-in-time gauges (current count at time of heartbeat)
+  int32 active_nodes = 3;
+
+  // Cumulative deltas since last heartbeat
+  int64 cpu_milliseconds_delta = 4;
+  int64 memory_mb_seconds_delta = 5;
+
+  // Sequence tracking — monotonic per cluster, persisted across agent restarts.
+  // Enables deduplication at both the gateway (in-memory) and workflow (processedSeqs).
+  uint64 sequence_number = 6;
+  uint64 last_ack_sequence = 7;  // last ACK received from the server
+
+  // Results of previously issued commands (optional, best-effort)
+  repeated CommandResult command_results = 8;
+}
+
+// HeartbeatResponse is sent from control plane to workload cluster.
+message HeartbeatResponse {
+  Status status = 1;
+  repeated QuotaInfo quotas = 2;
+
+  // ack_sequence: the highest sequence number whose TB transfer has been committed.
+  uint64 ack_sequence = 3;
+
+  // server_sequence: the server's monotonic counter (for ordering / debug).
+  uint64 server_sequence = 4;
+
+  // pending_commands: enforcement actions the cluster must execute.
+  repeated Command pending_commands = 5;
+}
+
+// CommandResult reports the outcome of a previously issued Command.
+message CommandResult {
+  Command.Type command_type = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+// HeartbeatUnaryRequest and HeartbeatUnaryResponse are aliases for the unary
+// fallback RPC; they use the same fields as stream variants.
+// Defined here to satisfy unique-type-per-RPC conventions if enforced later.
+message HeartbeatUnaryRequest {
+  HeartbeatRequest request = 1;
+}
+
+message HeartbeatUnaryResponse {
+  HeartbeatResponse response = 1;
+}

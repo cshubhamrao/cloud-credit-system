@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: creditdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PWD=postgres
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config/temporal:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8088:8080"
+    depends_on:
+      - temporal
+
+  valkey:
+    image: valkey/valkey:9.0.3-alpine
+    ports:
+      - "6379:6379"
+    command: valkey-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    command: >
+      start
+      --addresses=0.0.0.0:3000
+      /data/0_0.tigerbeetle
+    ports:
+      - "3000:3000"
+    volumes:
+      - tigerbeetle_data:/data
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ ! -f /data/0_0.tigerbeetle ]; then
+          /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
+        fi
+        exec /tigerbeetle start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+
+volumes:
+  postgres_data:
+  tigerbeetle_data:

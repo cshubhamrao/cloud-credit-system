@@ -1,0 +1,17 @@
+version: v2
+inputs:
+  - directory: proto
+plugins:
+  - local: .tools/protoc-gen-go
+    out: gen
+    opt:
+      - paths=source_relative
+  - local: .tools/protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/cshubhamrao/cloud-credit-system/gen

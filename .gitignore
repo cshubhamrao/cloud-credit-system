@@ -1,32 +1,53 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# ─── Binaries ────────────────────────────────────────────────────────────────
+bin/
+.tools/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# ─── Go ──────────────────────────────────────────────────────────────────────
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
 coverage.*
 *.coverprofile
 profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
 go.work
 go.work.sum
 
-# env file
-.env
+# ─── Generated code ──────────────────────────────────────────────────────────
+# gen/ and internal/db/sqlcgen/ are intentionally committed.
+# Committed generated code enables reproducible `go build` without buf/sqlc.
+# Regenerate with `make generate` after editing proto or SQL files.
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# ─── TigerBeetle ─────────────────────────────────────────────────────────────
+# Data files created by `tigerbeetle format` / docker-compose volume mounts
+*.tigerbeetle
+tigerbeetle-data/
+
+# ─── PostgreSQL ───────────────────────────────────────────────────────────────
+postgres-data/
+
+# ─── Temporal ────────────────────────────────────────────────────────────────
+temporal-data/
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+.docker/
+
+# ─── Secrets / env ───────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Editor / IDE ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ─── buf ─────────────────────────────────────────────────────────────────────
+# buf.lock is intentionally committed (pins BSR plugin versions)
+# buf.yaml and buf.gen.yaml are intentionally committed

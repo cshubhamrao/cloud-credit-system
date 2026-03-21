@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package creditsystem.v1;
+
+import "creditsystem/v1/common.proto";
+
+option go_package = "github.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1";
+
+service AdminService {
+  // IssueTenantCredit adds credits to a tenant's quota wallet (surge pack or manual adjustment).
+  rpc IssueTenantCredit(IssueTenantCreditRequest) returns (IssueTenantCreditResponse);
+
+  // ListTenantQuotas returns the current quota snapshot for all resources of a tenant.
+  rpc ListTenantQuotas(ListTenantQuotasRequest) returns (ListTenantQuotasResponse);
+
+  // ListTenants returns all active tenants (dashboard use).
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+
+  // ListClusters returns active workload clusters for a tenant (dashboard use).
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+}
+
+message IssueTenantCreditRequest {
+  string tenant_id = 1;
+  string resource_type = 2;
+  int64 amount = 3;
+  string reason = 4;
+}
+
+message IssueTenantCreditResponse {
+  string transfer_id = 1;      // TigerBeetle transfer ID (hex)
+  repeated QuotaInfo quotas = 2; // Updated quota snapshot for all resources after adjustment.
+}
+
+message ListTenantQuotasRequest {
+  string tenant_id = 1;
+}
+
+message ListTenantQuotasResponse {
+  repeated QuotaInfo quotas = 1;
+}
+
+message ListTenantsRequest {}
+
+message ListTenantsResponse {
+  repeated TenantSummary tenants = 1;
+}
+
+message ListClustersRequest {
+  string tenant_id = 1;
+}
+
+message ListClustersResponse {
+  repeated ClusterSummary clusters = 1;
+}

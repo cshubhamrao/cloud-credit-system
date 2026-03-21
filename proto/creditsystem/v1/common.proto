@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package creditsystem.v1;
+
+option go_package = "github.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1";
+
+// Status represents the current quota health for a tenant.
+enum Status {
+  STATUS_UNSPECIFIED = 0;     // zero-value default; treat as OK
+  STATUS_OK = 1;              // all resources within limits
+  STATUS_QUOTA_WARNING = 2;   // approaching soft limit
+  STATUS_QUOTA_EXCEEDED = 3;  // hard limit hit — TigerBeetle rejected transfer
+  STATUS_DEGRADED = 4;        // missed heartbeats, connection issues
+}
+
+// QuotaInfo carries the quota state for a single resource type.
+message QuotaInfo {
+  string resource_type = 1;
+  int64 used = 2;
+  int64 limit = 3;
+  int64 available = 4;
+  Status status = 5;
+}
+
+// TenantSummary carries tenant metadata for dashboard display.
+message TenantSummary {
+  string id = 1;
+  string name = 2;
+  string billing_tier = 3;  // free | starter | pro | enterprise
+  string status = 4;         // active | suspended | deregistered
+  string created_at = 5;     // ISO 8601
+}
+
+// ClusterSummary carries workload cluster metadata for dashboard display.
+message ClusterSummary {
+  string id = 1;
+  string tenant_id = 2;
+  string cloud_provider = 3;  // aws | gcp | azure
+  string region = 4;
+  string status = 5;          // healthy | degraded | unreachable | suspended
+  string last_heartbeat = 6;  // ISO 8601, empty if no heartbeat received
+  string agent_version = 7;
+}
+
+// Command is a server-pushed instruction to the workload cluster agent.
+message Command {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_THROTTLE = 1;    // reduce resource consumption rate
+    TYPE_SCALE_DOWN = 2;  // reduce node/replica count
+    TYPE_SHUTDOWN = 3;    // graceful shutdown of workload cluster
+  }
+  Type type = 1;
+  string reason = 2;
+  string payload_json = 3;  // optional structured payload
+}

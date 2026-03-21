@@ -1,0 +1,13 @@
+version: "2"
+sql:
+  - schema: "migrations"
+    queries: "queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "../internal/db/sqlcgen"
+        emit_json_tags: true
+        emit_db_tags: true
+        emit_pointers_for_null_types: true
+        query_parameter_limit: 5

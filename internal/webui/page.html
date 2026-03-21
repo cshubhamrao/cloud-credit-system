@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Credit System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace; }
+    .bar-anim { transition: width 0.4s ease; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between sticky top-0 bg-gray-950 z-10">
+    <div>
+      <span class="text-base font-bold text-white tracking-tight">Cloud Credit System</span>
+      <span class="ml-3 text-xs text-gray-600">BYOC control plane · PoC</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="error-badge" class="hidden px-2 py-0.5 rounded text-xs bg-red-900 text-red-300">fetch error</span>
+      <span class="text-xs text-gray-600">updated <span id="last-updated">—</span></span>
+    </div>
+  </header>
+
+  <main class="px-6 py-5 space-y-6 max-w-7xl mx-auto">
+
+    <!-- Runtime stats -->
+    <section>
+      <h2 class="text-xs text-gray-600 uppercase tracking-widest mb-3">Runtime</h2>
+      <div id="runtime-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div class="col-span-5 text-xs text-gray-700">Loading…</div>
+      </div>
+    </section>
+
+    <!-- Alerts -->
+    <section id="alerts-section" class="hidden">
+      <h2 class="text-xs text-gray-600 uppercase tracking-widest mb-3">Alerts</h2>
+      <div id="alerts-list" class="space-y-2"></div>
+    </section>
+
+    <!-- Tenants -->
+    <section>
+      <h2 class="text-xs text-gray-600 uppercase tracking-widest mb-3">
+        Tenants <span id="tenant-count" class="text-gray-700 normal-case tracking-normal"></span>
+      </h2>
+      <div id="tenants-list" class="space-y-4">
+        <p class="text-sm text-gray-700">Loading…</p>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // ── Connect RPC helper ────────────────────────────────────────────────────
+    // Connect protocol: POST /<package>.<Service>/<Method>
+    // Content-Type: application/json
+    // Body: JSON-encoded request message
+    // Response: JSON-encoded response message (or {"code":...,"message":...} on error)
+    const SVC = 'creditsystem.v1.AdminService';
+
+    async function rpc(method, body = {}) {
+      const resp = await fetch(`/${SVC}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(`${method}: ${json.message || resp.status}`);
+      return json;
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    const POLL_MS = 5000;
+
+    const RESOURCE_LABELS = {
+      cpu_hours:       'CPU Hours',
+      memory_gb_hours: 'Memory GB·h',
+      active_nodes:    'Active Nodes',
+    };
+
+    const TIER_COLORS = {
+      free:       'bg-gray-800 text-gray-400',
+      starter:    'bg-sky-950  text-sky-400',
+      pro:        'bg-violet-950 text-violet-400',
+      enterprise: 'bg-amber-950 text-amber-400',
+    };
+
+    const STATUS_COLORS = {
+      active:       'bg-emerald-950 text-emerald-400',
+      suspended:    'bg-yellow-950  text-yellow-400',
+      deregistered: 'bg-red-950     text-red-400',
+      healthy:      'bg-emerald-950 text-emerald-400',
+      degraded:     'bg-yellow-950  text-yellow-400',
+      unreachable:  'bg-red-950     text-red-400',
+    };
+
+    // ── Formatting helpers ────────────────────────────────────────────────────
+    function fmtNum(n, dec = 1) {
+      if (n == null) return '—';
+      if (n >= 1e9) return (n / 1e9).toFixed(dec) + 'B';
+      if (n >= 1e6) return (n / 1e6).toFixed(dec) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(dec) + 'K';
+      return dec === 0 ? String(Math.round(n)) : Number(n).toFixed(dec);
+    }
+
+    function fmtDuration(s) {
+      if (s < 60)   return s + 's';
+      if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    }
+
+    function fmtAgo(ts) {
+      if (!ts) return '—';
+      const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
+      if (diff < 5)    return 'just now';
+      if (diff < 60)   return diff + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      return new Date(ts).toLocaleTimeString();
+    }
+
+    function badge(text, cls) {
+      return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls || 'bg-gray-800 text-gray-400'}">${text}</span>`;
+    }
+
+    // ── Component builders ────────────────────────────────────────────────────
+    function statCard(label, value, sub) {
+      return `
+        <div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+          <div class="text-xs text-gray-600 mb-1">${label}</div>
+          <div class="text-2xl font-bold text-white tabular-nums">${value}</div>
+          ${sub ? `<div class="text-xs text-gray-700 mt-0.5">${sub}</div>` : ''}
+        </div>`;
+    }
+
+    // QuotaInfo from ListTenantQuotas: { resource_type, used, limit, available, status }
+    // Status enum: STATUS_OK=1, STATUS_QUOTA_WARNING=2, STATUS_QUOTA_EXCEEDED=3, STATUS_DEGRADED=4
+    function quotaBar(q) {
+      const label = RESOURCE_LABELS[q.resource_type] || q.resource_type;
+      const used  = Number(q.used  || 0);
+      const limit = Number(q.limit || 0);
+      const pct   = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+
+      let barCls = 'bg-sky-600';
+      if (q.status === 'STATUS_QUOTA_EXCEEDED' || q.status === 3) barCls = 'bg-red-600';
+      else if (q.status === 'STATUS_QUOTA_WARNING' || q.status === 2) barCls = 'bg-yellow-500';
+
+      return `
+        <div>
+          <div class="flex items-baseline justify-between mb-1 gap-2">
+            <span class="text-xs text-gray-400">${label}</span>
+            <span class="text-xs text-gray-600 whitespace-nowrap">${fmtNum(used, 0)} / ${fmtNum(limit, 0)}</span>
+          </div>
+          <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div class="${barCls} h-full rounded-full bar-anim" style="width:${pct.toFixed(1)}%"></div>
+          </div>
+          <div class="text-xs text-gray-700 mt-1">avail: ${fmtNum(Number(q.available || 0), 0)}</div>
+        </div>`;
+    }
+
+    // A cluster is stale if its last heartbeat is > 5 minutes old (uses idx_clusters_last_heartbeat).
+    const STALE_MS = 5 * 60 * 1000;
+    function isStale(ts) {
+      if (!ts) return true;
+      return (Date.now() - new Date(ts)) > STALE_MS;
+    }
+
+    // ClusterSummary from ListClusters: { id, cloud_provider, region, status, last_heartbeat, agent_version }
+    function clusterChip(c) {
+      const stale = isStale(c.last_heartbeat);
+      const sc = stale
+        ? 'bg-orange-950 text-orange-400'
+        : (STATUS_COLORS[c.status] || 'bg-gray-800 text-gray-400');
+      const hb  = fmtAgo(c.last_heartbeat);
+      const prov = (c.cloud_provider || '').toUpperCase();
+      const staleMark = stale ? '<span class="text-orange-500">⚑</span> ' : '';
+      return `
+        <div class="border border-gray-800 rounded px-3 py-2 text-xs bg-gray-900/50">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="font-semibold text-gray-200">${staleMark}${prov} · ${c.region}</span>
+            ${badge(stale ? 'stale' : c.status, sc)}
+          </div>
+          <div class="text-gray-700">hb: ${hb} · <span class="font-mono">${(c.id || '').slice(0, 8)}</span></div>
+        </div>`;
+    }
+
+    // Renders one tenant card given the tenant summary + pre-fetched quotas + clusters.
+    function tenantCard(t, quotas, clusters) {
+      const tierCls   = TIER_COLORS[t.billing_tier]  || 'bg-gray-800 text-gray-400';
+      const statusCls = STATUS_COLORS[t.status]       || 'bg-gray-800 text-gray-400';
+
+      const quotasHtml = quotas && quotas.length
+        ? `<div class="space-y-3">${quotas.map(quotaBar).join('')}</div>`
+        : `<p class="text-xs text-gray-700 italic">No quota snapshots yet</p>`;
+
+      const clustersHtml = clusters && clusters.length
+        ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${clusters.map(clusterChip).join('')}</div>`
+        : `<p class="text-xs text-gray-700 italic">No clusters</p>`;
+
+      return `
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <div class="flex items-center gap-2 mb-4 flex-wrap">
+            <span class="text-sm font-bold text-white">${t.name}</span>
+            ${badge(t.billing_tier, tierCls)}
+            ${badge(t.status, statusCls)}
+            <span class="ml-auto text-xs text-gray-700 font-mono">${(t.id || '').slice(0, 8)}</span>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <div class="text-xs text-gray-600 uppercase tracking-wider mb-2">Quotas</div>
+              ${quotasHtml}
+            </div>
+            <div>
+              <div class="text-xs text-gray-600 uppercase tracking-wider mb-2">Clusters (${(clusters || []).length})</div>
+              ${clustersHtml}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    function renderRuntime(rt) {
+      document.getElementById('runtime-cards').innerHTML = [
+        statCard('Uptime',         fmtDuration(rt.uptime_s)),
+        statCard('Active Streams', rt.active_streams),
+        statCard('Msg/sec',        rt.msg_per_sec.toFixed(1), `total: ${fmtNum(rt.msg_total, 0)}`),
+        statCard('Signal P50',     rt.signal_p50_us + 'µs',  `P99: ${rt.signal_p99_us}µs`),
+        statCard('Heap',           rt.heap_alloc_mb.toFixed(1) + ' MB', `goroutines: ${rt.goroutines}`),
+      ].join('');
+    }
+
+    function renderAlerts(allData) {
+      // allData: [{ tenant, quotas, clusters }]
+      const alerts = [];
+
+      for (const { tenant, quotas, clusters } of allData) {
+        // Near-exhaustion: STATUS_QUOTA_EXCEEDED=3 or STATUS_QUOTA_WARNING=2
+        // Backed by idx_quota_snapshots_available on the server side.
+        for (const q of quotas) {
+          const s = q.status;
+          if (s === 'STATUS_QUOTA_EXCEEDED' || s === 3) {
+            alerts.push({ level: 'error', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resource_type] || q.resource_type} quota EXCEEDED (${fmtNum(Number(q.available || 0), 0)} avail)` });
+          } else if (s === 'STATUS_QUOTA_WARNING' || s === 2) {
+            alerts.push({ level: 'warn', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resource_type] || q.resource_type} quota warning (${fmtNum(Number(q.available || 0), 0)} avail)` });
+          }
+        }
+        // Stale clusters: backed by idx_clusters_last_heartbeat on the server side.
+        for (const c of clusters) {
+          if (isStale(c.last_heartbeat)) {
+            alerts.push({ level: 'warn', msg: `${tenant.name} — cluster ${c.cloud_provider.toUpperCase()} ${c.region} stale (hb: ${fmtAgo(c.last_heartbeat)})` });
+          }
+        }
+      }
+
+      const section = document.getElementById('alerts-section');
+      const list    = document.getElementById('alerts-list');
+      if (!alerts.length) {
+        section.classList.add('hidden');
+        return;
+      }
+      section.classList.remove('hidden');
+      list.innerHTML = alerts.map(a => {
+        const cls = a.level === 'error'
+          ? 'bg-red-950 border-red-800 text-red-300'
+          : 'bg-yellow-950 border-yellow-800 text-yellow-300';
+        return `<div class="border rounded px-4 py-2 text-xs ${cls}">${a.msg}</div>`;
+      }).join('');
+    }
+
+    async function renderTenants(tenants) {
+      const el = document.getElementById('tenants-list');
+      document.getElementById('tenant-count').textContent = tenants.length ? `(${tenants.length})` : '';
+
+      if (!tenants.length) {
+        el.innerHTML = '<p class="text-sm text-gray-700">No tenants registered.</p>';
+        renderAlerts([]);
+        return;
+      }
+
+      // Fan out: fetch quotas + clusters for each tenant in parallel via RPC.
+      const allData = await Promise.all(tenants.map(async tenant => {
+        const [quotaResp, clusterResp] = await Promise.all([
+          rpc('ListTenantQuotas', { tenant_id: tenant.id }).catch(() => ({ quotas: [] })),
+          rpc('ListClusters',     { tenant_id: tenant.id }).catch(() => ({ clusters: [] })),
+        ]);
+        return { tenant, quotas: quotaResp.quotas || [], clusters: clusterResp.clusters || [] };
+      }));
+
+      renderAlerts(allData);
+      el.innerHTML = allData.map(({ tenant, quotas, clusters }) =>
+        tenantCard(tenant, quotas, clusters)
+      ).join('');
+    }
+
+    // ── Poll ──────────────────────────────────────────────────────────────────
+    async function refresh() {
+      try {
+        // Runtime stats (in-process metrics — served by /api/ui/stats, not RPC)
+        const rtResp = await fetch('/api/ui/stats');
+        if (!rtResp.ok) throw new Error('stats HTTP ' + rtResp.status);
+        const rt = await rtResp.json();
+        renderRuntime(rt);
+
+        // Tenant list via ListTenants RPC, then fan out for details
+        const { tenants } = await rpc('ListTenants');
+        await renderTenants(tenants || []);
+
+        document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+        document.getElementById('error-badge').classList.add('hidden');
+      } catch (e) {
+        console.error('refresh:', e);
+        document.getElementById('error-badge').classList.remove('hidden');
+      }
+    }
+
+    refresh();
+    setInterval(refresh, POLL_MS);
+  </script>
+</body>
+</html>

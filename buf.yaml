@@ -1,0 +1,18 @@
+version: v2
+modules:
+  - path: proto
+    name: buf.build/cshubhamrao/cloud-credit-system
+lint:
+  use:
+    - STANDARD
+  ignore_only:
+    # HeartbeatStream and Heartbeat intentionally share request/response types.
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - proto/creditsystem/v1/heartbeat.proto
+    RPC_REQUEST_STANDARD_NAME:
+      - proto/creditsystem/v1/heartbeat.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - proto/creditsystem/v1/heartbeat.proto
+breaking:
+  use:
+    - FILE
