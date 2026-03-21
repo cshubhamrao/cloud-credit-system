@@ -9,3 +9,13 @@ frontend.enableUpdateWorkflowExecution:
 frontend.enableUpdateWorkflowExecutionAsyncAccepted:
   - value: true
     constraints: {}
+
+# Delete closed workflow history and visibility records after retention expires
+worker.workflowExecutionScavengerEnabled:
+  - value: true
+    constraints: {}
+
+# Run scavenger every 15 minutes (default is 1h; shorter for dev)
+worker.executionScavengerInterval:
+  - value: 15m
+    constraints: {}

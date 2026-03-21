@@ -24,6 +24,7 @@ services:
       - POSTGRES_PWD=postgres
       - POSTGRES_SEEDS=postgres
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - DEFAULT_NAMESPACE_RETENTION=8h
     ports:
       - "7233:7233"
     depends_on:

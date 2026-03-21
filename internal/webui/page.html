@@ -134,17 +134,17 @@
         </div>`;
     }
 
-    // QuotaInfo from ListTenantQuotas: { resource_type, used, limit, available, status }
-    // Status enum: STATUS_OK=1, STATUS_QUOTA_WARNING=2, STATUS_QUOTA_EXCEEDED=3, STATUS_DEGRADED=4
+    // QuotaInfo from ListTenantQuotas (camelCase JSON): { resourceType, used, limit, available, status }
+    // Status enum string: STATUS_OK, STATUS_QUOTA_WARNING, STATUS_QUOTA_EXCEEDED
     function quotaBar(q) {
-      const label = RESOURCE_LABELS[q.resource_type] || q.resource_type;
+      const label = RESOURCE_LABELS[q.resourceType] || q.resourceType;
       const used  = Number(q.used  || 0);
       const limit = Number(q.limit || 0);
       const pct   = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 
       let barCls = 'bg-sky-600';
-      if (q.status === 'STATUS_QUOTA_EXCEEDED' || q.status === 3) barCls = 'bg-red-600';
-      else if (q.status === 'STATUS_QUOTA_WARNING' || q.status === 2) barCls = 'bg-yellow-500';
+      if (q.status === 'STATUS_QUOTA_EXCEEDED') barCls = 'bg-red-600';
+      else if (q.status === 'STATUS_QUOTA_WARNING') barCls = 'bg-yellow-500';
 
       return `
         <div>
@@ -166,14 +166,14 @@
       return (Date.now() - new Date(ts)) > STALE_MS;
     }
 
-    // ClusterSummary from ListClusters: { id, cloud_provider, region, status, last_heartbeat, agent_version }
+    // ClusterSummary from ListClusters (camelCase JSON): { id, cloudProvider, region, status, lastHeartbeat, agentVersion }
     function clusterChip(c) {
-      const stale = isStale(c.last_heartbeat);
+      const stale = isStale(c.lastHeartbeat);
       const sc = stale
         ? 'bg-orange-950 text-orange-400'
         : (STATUS_COLORS[c.status] || 'bg-gray-800 text-gray-400');
-      const hb  = fmtAgo(c.last_heartbeat);
-      const prov = (c.cloud_provider || '').toUpperCase();
+      const hb   = fmtAgo(c.lastHeartbeat);
+      const prov = (c.cloudProvider || '').toUpperCase();
       const staleMark = stale ? '<span class="text-orange-500">⚑</span> ' : '';
       return `
         <div class="border border-gray-800 rounded px-3 py-2 text-xs bg-gray-900/50">
@@ -186,9 +186,10 @@
     }
 
     // Renders one tenant card given the tenant summary + pre-fetched quotas + clusters.
+    // TenantSummary (camelCase JSON): { id, name, billingTier, status, createdAt }
     function tenantCard(t, quotas, clusters) {
-      const tierCls   = TIER_COLORS[t.billing_tier]  || 'bg-gray-800 text-gray-400';
-      const statusCls = STATUS_COLORS[t.status]       || 'bg-gray-800 text-gray-400';
+      const tierCls   = TIER_COLORS[t.billingTier] || 'bg-gray-800 text-gray-400';
+      const statusCls = STATUS_COLORS[t.status]     || 'bg-gray-800 text-gray-400';
 
       const quotasHtml = quotas && quotas.length
         ? `<div class="space-y-3">${quotas.map(quotaBar).join('')}</div>`
@@ -202,7 +203,7 @@
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-sm font-bold text-white">${t.name}</span>
-            ${badge(t.billing_tier, tierCls)}
+            ${badge(t.billingTier, tierCls)}
             ${badge(t.status, statusCls)}
             <span class="ml-auto text-xs text-gray-700 font-mono">${(t.id || '').slice(0, 8)}</span>
           </div>
@@ -238,17 +239,16 @@
         // Near-exhaustion: STATUS_QUOTA_EXCEEDED=3 or STATUS_QUOTA_WARNING=2
         // Backed by idx_quota_snapshots_available on the server side.
         for (const q of quotas) {
-          const s = q.status;
-          if (s === 'STATUS_QUOTA_EXCEEDED' || s === 3) {
-            alerts.push({ level: 'error', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resource_type] || q.resource_type} quota EXCEEDED (${fmtNum(Number(q.available || 0), 0)} avail)` });
-          } else if (s === 'STATUS_QUOTA_WARNING' || s === 2) {
-            alerts.push({ level: 'warn', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resource_type] || q.resource_type} quota warning (${fmtNum(Number(q.available || 0), 0)} avail)` });
+          if (q.status === 'STATUS_QUOTA_EXCEEDED') {
+            alerts.push({ level: 'error', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resourceType] || q.resourceType} quota EXCEEDED (${fmtNum(Number(q.available || 0), 0)} avail)` });
+          } else if (q.status === 'STATUS_QUOTA_WARNING') {
+            alerts.push({ level: 'warn', msg: `${tenant.name} — ${RESOURCE_LABELS[q.resourceType] || q.resourceType} quota warning (${fmtNum(Number(q.available || 0), 0)} avail)` });
           }
         }
         // Stale clusters: backed by idx_clusters_last_heartbeat on the server side.
         for (const c of clusters) {
-          if (isStale(c.last_heartbeat)) {
-            alerts.push({ level: 'warn', msg: `${tenant.name} — cluster ${c.cloud_provider.toUpperCase()} ${c.region} stale (hb: ${fmtAgo(c.last_heartbeat)})` });
+          if (isStale(c.lastHeartbeat)) {
+            alerts.push({ level: 'warn', msg: `${tenant.name} — cluster ${(c.cloudProvider || '').toUpperCase()} ${c.region} stale (hb: ${fmtAgo(c.lastHeartbeat)})` });
           }
         }
       }
@@ -281,8 +281,8 @@
       // Fan out: fetch quotas + clusters for each tenant in parallel via RPC.
       const allData = await Promise.all(tenants.map(async tenant => {
         const [quotaResp, clusterResp] = await Promise.all([
-          rpc('ListTenantQuotas', { tenant_id: tenant.id }).catch(() => ({ quotas: [] })),
-          rpc('ListClusters',     { tenant_id: tenant.id }).catch(() => ({ clusters: [] })),
+          rpc('ListTenantQuotas', { tenantId: tenant.id }).catch(() => ({ quotas: [] })),
+          rpc('ListClusters',     { tenantId: tenant.id }).catch(() => ({ clusters: [] })),
         ]);
         return { tenant, quotas: quotaResp.quotas || [], clusters: clusterResp.clusters || [] };
       }));
