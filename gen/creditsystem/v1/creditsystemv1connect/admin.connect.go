@@ -45,6 +45,9 @@ const (
 	// AdminServiceListClustersProcedure is the fully-qualified name of the AdminService's ListClusters
 	// RPC.
 	AdminServiceListClustersProcedure = "/creditsystem.v1.AdminService/ListClusters"
+	// AdminServiceListCreditAdjustmentsProcedure is the fully-qualified name of the AdminService's
+	// ListCreditAdjustments RPC.
+	AdminServiceListCreditAdjustmentsProcedure = "/creditsystem.v1.AdminService/ListCreditAdjustments"
 )
 
 // AdminServiceClient is a client for the creditsystem.v1.AdminService service.
@@ -57,6 +60,8 @@ type AdminServiceClient interface {
 	ListTenants(context.Context, *connect.Request[v1.ListTenantsRequest]) (*connect.Response[v1.ListTenantsResponse], error)
 	// ListClusters returns active workload clusters for a tenant (dashboard use).
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
+	// ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
+	ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error)
 }
 
 // NewAdminServiceClient constructs a client for the creditsystem.v1.AdminService service. By
@@ -94,15 +99,22 @@ func NewAdminServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(adminServiceMethods.ByName("ListClusters")),
 			connect.WithClientOptions(opts...),
 		),
+		listCreditAdjustments: connect.NewClient[v1.ListCreditAdjustmentsRequest, v1.ListCreditAdjustmentsResponse](
+			httpClient,
+			baseURL+AdminServiceListCreditAdjustmentsProcedure,
+			connect.WithSchema(adminServiceMethods.ByName("ListCreditAdjustments")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // adminServiceClient implements AdminServiceClient.
 type adminServiceClient struct {
-	issueTenantCredit *connect.Client[v1.IssueTenantCreditRequest, v1.IssueTenantCreditResponse]
-	listTenantQuotas  *connect.Client[v1.ListTenantQuotasRequest, v1.ListTenantQuotasResponse]
-	listTenants       *connect.Client[v1.ListTenantsRequest, v1.ListTenantsResponse]
-	listClusters      *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
+	issueTenantCredit     *connect.Client[v1.IssueTenantCreditRequest, v1.IssueTenantCreditResponse]
+	listTenantQuotas      *connect.Client[v1.ListTenantQuotasRequest, v1.ListTenantQuotasResponse]
+	listTenants           *connect.Client[v1.ListTenantsRequest, v1.ListTenantsResponse]
+	listClusters          *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
+	listCreditAdjustments *connect.Client[v1.ListCreditAdjustmentsRequest, v1.ListCreditAdjustmentsResponse]
 }
 
 // IssueTenantCredit calls creditsystem.v1.AdminService.IssueTenantCredit.
@@ -125,6 +137,11 @@ func (c *adminServiceClient) ListClusters(ctx context.Context, req *connect.Requ
 	return c.listClusters.CallUnary(ctx, req)
 }
 
+// ListCreditAdjustments calls creditsystem.v1.AdminService.ListCreditAdjustments.
+func (c *adminServiceClient) ListCreditAdjustments(ctx context.Context, req *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error) {
+	return c.listCreditAdjustments.CallUnary(ctx, req)
+}
+
 // AdminServiceHandler is an implementation of the creditsystem.v1.AdminService service.
 type AdminServiceHandler interface {
 	// IssueTenantCredit adds credits to a tenant's quota wallet (surge pack or manual adjustment).
@@ -135,6 +152,8 @@ type AdminServiceHandler interface {
 	ListTenants(context.Context, *connect.Request[v1.ListTenantsRequest]) (*connect.Response[v1.ListTenantsResponse], error)
 	// ListClusters returns active workload clusters for a tenant (dashboard use).
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
+	// ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
+	ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error)
 }
 
 // NewAdminServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -168,6 +187,12 @@ func NewAdminServiceHandler(svc AdminServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(adminServiceMethods.ByName("ListClusters")),
 		connect.WithHandlerOptions(opts...),
 	)
+	adminServiceListCreditAdjustmentsHandler := connect.NewUnaryHandler(
+		AdminServiceListCreditAdjustmentsProcedure,
+		svc.ListCreditAdjustments,
+		connect.WithSchema(adminServiceMethods.ByName("ListCreditAdjustments")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/creditsystem.v1.AdminService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AdminServiceIssueTenantCreditProcedure:
@@ -178,6 +203,8 @@ func NewAdminServiceHandler(svc AdminServiceHandler, opts ...connect.HandlerOpti
 			adminServiceListTenantsHandler.ServeHTTP(w, r)
 		case AdminServiceListClustersProcedure:
 			adminServiceListClustersHandler.ServeHTTP(w, r)
+		case AdminServiceListCreditAdjustmentsProcedure:
+			adminServiceListCreditAdjustmentsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +228,8 @@ func (UnimplementedAdminServiceHandler) ListTenants(context.Context, *connect.Re
 
 func (UnimplementedAdminServiceHandler) ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("creditsystem.v1.AdminService.ListClusters is not implemented"))
+}
+
+func (UnimplementedAdminServiceHandler) ListCreditAdjustments(context.Context, *connect.Request[v1.ListCreditAdjustmentsRequest]) (*connect.Response[v1.ListCreditAdjustmentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("creditsystem.v1.AdminService.ListCreditAdjustments is not implemented"))
 }

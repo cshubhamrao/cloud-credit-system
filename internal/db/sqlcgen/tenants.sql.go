@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteTenant = `-- name: DeleteTenant :exec
+UPDATE tenants SET status = 'deregistered', deleted_at = NOW() WHERE id = $1
+`
+
+func (q *Queries) DeleteTenant(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deleteTenant, id)
+	return err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT id, name, billing_tier, status, created_at, deleted_at FROM tenants WHERE id = $1
 `

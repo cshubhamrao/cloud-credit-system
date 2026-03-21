@@ -78,8 +78,12 @@ sql/queries/              ← sqlc query files
 
 - Go 1.24+
 - Docker + Docker Compose
-- `buf` CLI: `go install github.com/bufbuild/buf/cmd/buf@latest`
-- `sqlc`: `go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest`
+
+Both `buf` and `sqlc` are registered as `go tool` dependencies — no separate install needed:
+```bash
+go tool buf generate     # proto → Go
+go tool sqlc generate    # SQL → Go
+```
 
 ### 1. Start infrastructure
 

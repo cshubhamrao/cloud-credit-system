@@ -397,6 +397,178 @@ func (x *ListClustersResponse) GetClusters() []*ClusterSummary {
 	return nil
 }
 
+type ListCreditAdjustmentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCreditAdjustmentsRequest) Reset() {
+	*x = ListCreditAdjustmentsRequest{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCreditAdjustmentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCreditAdjustmentsRequest) ProtoMessage() {}
+
+func (x *ListCreditAdjustmentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCreditAdjustmentsRequest.ProtoReflect.Descriptor instead.
+func (*ListCreditAdjustmentsRequest) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListCreditAdjustmentsRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+type CreditAdjustmentEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ResourceType  string                 `protobuf:"bytes,2,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	Amount        int64                  `protobuf:"varint,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	TransferId    string                 `protobuf:"bytes,5,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"` // hex-encoded TigerBeetle transfer ID; empty if not available
+	CreatedAt     string                 `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`    // ISO 8601
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreditAdjustmentEntry) Reset() {
+	*x = CreditAdjustmentEntry{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreditAdjustmentEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreditAdjustmentEntry) ProtoMessage() {}
+
+func (x *CreditAdjustmentEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreditAdjustmentEntry.ProtoReflect.Descriptor instead.
+func (*CreditAdjustmentEntry) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreditAdjustmentEntry) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CreditAdjustmentEntry) GetResourceType() string {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ""
+}
+
+func (x *CreditAdjustmentEntry) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *CreditAdjustmentEntry) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *CreditAdjustmentEntry) GetTransferId() string {
+	if x != nil {
+		return x.TransferId
+	}
+	return ""
+}
+
+func (x *CreditAdjustmentEntry) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+type ListCreditAdjustmentsResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Adjustments   []*CreditAdjustmentEntry `protobuf:"bytes,1,rep,name=adjustments,proto3" json:"adjustments,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCreditAdjustmentsResponse) Reset() {
+	*x = ListCreditAdjustmentsResponse{}
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCreditAdjustmentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCreditAdjustmentsResponse) ProtoMessage() {}
+
+func (x *ListCreditAdjustmentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_creditsystem_v1_admin_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCreditAdjustmentsResponse.ProtoReflect.Descriptor instead.
+func (*ListCreditAdjustmentsResponse) Descriptor() ([]byte, []int) {
+	return file_creditsystem_v1_admin_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListCreditAdjustmentsResponse) GetAdjustments() []*CreditAdjustmentEntry {
+	if x != nil {
+		return x.Adjustments
+	}
+	return nil
+}
+
 var File_creditsystem_v1_admin_proto protoreflect.FileDescriptor
 
 const file_creditsystem_v1_admin_proto_rawDesc = "" +
@@ -421,12 +593,26 @@ const file_creditsystem_v1_admin_proto_rawDesc = "" +
 	"\x13ListClustersRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\"S\n" +
 	"\x14ListClustersResponse\x12;\n" +
-	"\bclusters\x18\x01 \x03(\v2\x1f.creditsystem.v1.ClusterSummaryR\bclusters2\x9a\x03\n" +
+	"\bclusters\x18\x01 \x03(\v2\x1f.creditsystem.v1.ClusterSummaryR\bclusters\";\n" +
+	"\x1cListCreditAdjustmentsRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\"\xbc\x01\n" +
+	"\x15CreditAdjustmentEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
+	"\rresource_type\x18\x02 \x01(\tR\fresourceType\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\x03R\x06amount\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1f\n" +
+	"\vtransfer_id\x18\x05 \x01(\tR\n" +
+	"transferId\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\tR\tcreatedAt\"i\n" +
+	"\x1dListCreditAdjustmentsResponse\x12H\n" +
+	"\vadjustments\x18\x01 \x03(\v2&.creditsystem.v1.CreditAdjustmentEntryR\vadjustments2\x92\x04\n" +
 	"\fAdminService\x12j\n" +
 	"\x11IssueTenantCredit\x12).creditsystem.v1.IssueTenantCreditRequest\x1a*.creditsystem.v1.IssueTenantCreditResponse\x12g\n" +
 	"\x10ListTenantQuotas\x12(.creditsystem.v1.ListTenantQuotasRequest\x1a).creditsystem.v1.ListTenantQuotasResponse\x12X\n" +
 	"\vListTenants\x12#.creditsystem.v1.ListTenantsRequest\x1a$.creditsystem.v1.ListTenantsResponse\x12[\n" +
-	"\fListClusters\x12$.creditsystem.v1.ListClustersRequest\x1a%.creditsystem.v1.ListClustersResponseB\xcd\x01\n" +
+	"\fListClusters\x12$.creditsystem.v1.ListClustersRequest\x1a%.creditsystem.v1.ListClustersResponse\x12v\n" +
+	"\x15ListCreditAdjustments\x12-.creditsystem.v1.ListCreditAdjustmentsRequest\x1a..creditsystem.v1.ListCreditAdjustmentsResponseB\xcd\x01\n" +
 	"\x13com.creditsystem.v1B\n" +
 	"AdminProtoP\x01ZMgithub.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1;creditsystemv1\xa2\x02\x03CXX\xaa\x02\x0fCreditsystem.V1\xca\x02\x0fCreditsystem\\V1\xe2\x02\x1bCreditsystem\\V1\\GPBMetadata\xea\x02\x10Creditsystem::V1b\x06proto3"
 
@@ -442,38 +628,44 @@ func file_creditsystem_v1_admin_proto_rawDescGZIP() []byte {
 	return file_creditsystem_v1_admin_proto_rawDescData
 }
 
-var file_creditsystem_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_creditsystem_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_creditsystem_v1_admin_proto_goTypes = []any{
-	(*IssueTenantCreditRequest)(nil),  // 0: creditsystem.v1.IssueTenantCreditRequest
-	(*IssueTenantCreditResponse)(nil), // 1: creditsystem.v1.IssueTenantCreditResponse
-	(*ListTenantQuotasRequest)(nil),   // 2: creditsystem.v1.ListTenantQuotasRequest
-	(*ListTenantQuotasResponse)(nil),  // 3: creditsystem.v1.ListTenantQuotasResponse
-	(*ListTenantsRequest)(nil),        // 4: creditsystem.v1.ListTenantsRequest
-	(*ListTenantsResponse)(nil),       // 5: creditsystem.v1.ListTenantsResponse
-	(*ListClustersRequest)(nil),       // 6: creditsystem.v1.ListClustersRequest
-	(*ListClustersResponse)(nil),      // 7: creditsystem.v1.ListClustersResponse
-	(*QuotaInfo)(nil),                 // 8: creditsystem.v1.QuotaInfo
-	(*TenantSummary)(nil),             // 9: creditsystem.v1.TenantSummary
-	(*ClusterSummary)(nil),            // 10: creditsystem.v1.ClusterSummary
+	(*IssueTenantCreditRequest)(nil),      // 0: creditsystem.v1.IssueTenantCreditRequest
+	(*IssueTenantCreditResponse)(nil),     // 1: creditsystem.v1.IssueTenantCreditResponse
+	(*ListTenantQuotasRequest)(nil),       // 2: creditsystem.v1.ListTenantQuotasRequest
+	(*ListTenantQuotasResponse)(nil),      // 3: creditsystem.v1.ListTenantQuotasResponse
+	(*ListTenantsRequest)(nil),            // 4: creditsystem.v1.ListTenantsRequest
+	(*ListTenantsResponse)(nil),           // 5: creditsystem.v1.ListTenantsResponse
+	(*ListClustersRequest)(nil),           // 6: creditsystem.v1.ListClustersRequest
+	(*ListClustersResponse)(nil),          // 7: creditsystem.v1.ListClustersResponse
+	(*ListCreditAdjustmentsRequest)(nil),  // 8: creditsystem.v1.ListCreditAdjustmentsRequest
+	(*CreditAdjustmentEntry)(nil),         // 9: creditsystem.v1.CreditAdjustmentEntry
+	(*ListCreditAdjustmentsResponse)(nil), // 10: creditsystem.v1.ListCreditAdjustmentsResponse
+	(*QuotaInfo)(nil),                     // 11: creditsystem.v1.QuotaInfo
+	(*TenantSummary)(nil),                 // 12: creditsystem.v1.TenantSummary
+	(*ClusterSummary)(nil),                // 13: creditsystem.v1.ClusterSummary
 }
 var file_creditsystem_v1_admin_proto_depIdxs = []int32{
-	8,  // 0: creditsystem.v1.IssueTenantCreditResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
-	8,  // 1: creditsystem.v1.ListTenantQuotasResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
-	9,  // 2: creditsystem.v1.ListTenantsResponse.tenants:type_name -> creditsystem.v1.TenantSummary
-	10, // 3: creditsystem.v1.ListClustersResponse.clusters:type_name -> creditsystem.v1.ClusterSummary
-	0,  // 4: creditsystem.v1.AdminService.IssueTenantCredit:input_type -> creditsystem.v1.IssueTenantCreditRequest
-	2,  // 5: creditsystem.v1.AdminService.ListTenantQuotas:input_type -> creditsystem.v1.ListTenantQuotasRequest
-	4,  // 6: creditsystem.v1.AdminService.ListTenants:input_type -> creditsystem.v1.ListTenantsRequest
-	6,  // 7: creditsystem.v1.AdminService.ListClusters:input_type -> creditsystem.v1.ListClustersRequest
-	1,  // 8: creditsystem.v1.AdminService.IssueTenantCredit:output_type -> creditsystem.v1.IssueTenantCreditResponse
-	3,  // 9: creditsystem.v1.AdminService.ListTenantQuotas:output_type -> creditsystem.v1.ListTenantQuotasResponse
-	5,  // 10: creditsystem.v1.AdminService.ListTenants:output_type -> creditsystem.v1.ListTenantsResponse
-	7,  // 11: creditsystem.v1.AdminService.ListClusters:output_type -> creditsystem.v1.ListClustersResponse
-	8,  // [8:12] is the sub-list for method output_type
-	4,  // [4:8] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	11, // 0: creditsystem.v1.IssueTenantCreditResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
+	11, // 1: creditsystem.v1.ListTenantQuotasResponse.quotas:type_name -> creditsystem.v1.QuotaInfo
+	12, // 2: creditsystem.v1.ListTenantsResponse.tenants:type_name -> creditsystem.v1.TenantSummary
+	13, // 3: creditsystem.v1.ListClustersResponse.clusters:type_name -> creditsystem.v1.ClusterSummary
+	9,  // 4: creditsystem.v1.ListCreditAdjustmentsResponse.adjustments:type_name -> creditsystem.v1.CreditAdjustmentEntry
+	0,  // 5: creditsystem.v1.AdminService.IssueTenantCredit:input_type -> creditsystem.v1.IssueTenantCreditRequest
+	2,  // 6: creditsystem.v1.AdminService.ListTenantQuotas:input_type -> creditsystem.v1.ListTenantQuotasRequest
+	4,  // 7: creditsystem.v1.AdminService.ListTenants:input_type -> creditsystem.v1.ListTenantsRequest
+	6,  // 8: creditsystem.v1.AdminService.ListClusters:input_type -> creditsystem.v1.ListClustersRequest
+	8,  // 9: creditsystem.v1.AdminService.ListCreditAdjustments:input_type -> creditsystem.v1.ListCreditAdjustmentsRequest
+	1,  // 10: creditsystem.v1.AdminService.IssueTenantCredit:output_type -> creditsystem.v1.IssueTenantCreditResponse
+	3,  // 11: creditsystem.v1.AdminService.ListTenantQuotas:output_type -> creditsystem.v1.ListTenantQuotasResponse
+	5,  // 12: creditsystem.v1.AdminService.ListTenants:output_type -> creditsystem.v1.ListTenantsResponse
+	7,  // 13: creditsystem.v1.AdminService.ListClusters:output_type -> creditsystem.v1.ListClustersResponse
+	10, // 14: creditsystem.v1.AdminService.ListCreditAdjustments:output_type -> creditsystem.v1.ListCreditAdjustmentsResponse
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_creditsystem_v1_admin_proto_init() }
@@ -488,7 +680,7 @@ func file_creditsystem_v1_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_creditsystem_v1_admin_proto_rawDesc), len(file_creditsystem_v1_admin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

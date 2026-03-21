@@ -18,6 +18,9 @@ service AdminService {
 
   // ListClusters returns active workload clusters for a tenant (dashboard use).
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+
+  // ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
+  rpc ListCreditAdjustments(ListCreditAdjustmentsRequest) returns (ListCreditAdjustmentsResponse);
 }
 
 message IssueTenantCreditRequest {
@@ -52,4 +55,21 @@ message ListClustersRequest {
 
 message ListClustersResponse {
   repeated ClusterSummary clusters = 1;
+}
+
+message ListCreditAdjustmentsRequest {
+  string tenant_id = 1;
+}
+
+message CreditAdjustmentEntry {
+  string id = 1;
+  string resource_type = 2;
+  int64 amount = 3;
+  string reason = 4;
+  string transfer_id = 5;  // hex-encoded TigerBeetle transfer ID; empty if not available
+  string created_at = 6;   // ISO 8601
+}
+
+message ListCreditAdjustmentsResponse {
+  repeated CreditAdjustmentEntry adjustments = 1;
 }

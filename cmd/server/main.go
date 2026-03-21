@@ -206,6 +206,7 @@ func main() {
 	uiHandler := webui.NewHandler(pool, startTime, hbHandler, streamMgr)
 	mux.Handle("/ui", uiHandler)
 	mux.Handle("/api/ui/stats", uiHandler)
+	mux.Handle("/api/ui/report", uiHandler)
 
 	// ─── HTTP Server (h2c — HTTP/2 cleartext for gRPC bidi without TLS) ─────
 	h2s := &http2.Server{}

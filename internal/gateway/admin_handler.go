@@ -164,6 +164,41 @@ func (h *AdminHandler) ListTenants(
 	return connect.NewResponse(&creditsystemv1.ListTenantsResponse{Tenants: tenants}), nil
 }
 
+// ListCreditAdjustments returns the credit adjustment audit trail for a tenant.
+func (h *AdminHandler) ListCreditAdjustments(
+	ctx context.Context,
+	req *connect.Request[creditsystemv1.ListCreditAdjustmentsRequest],
+) (*connect.Response[creditsystemv1.ListCreditAdjustmentsResponse], error) {
+	tenantUUID, err := uuid.Parse(req.Msg.TenantId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid tenant ID: %w", err))
+	}
+
+	q := sqlcgen.New(h.db)
+	rows, err := q.ListCreditAdjustmentsByTenant(ctx, tenantUUID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("ListCreditAdjustmentsByTenant: %w", err))
+	}
+
+	entries := make([]*creditsystemv1.CreditAdjustmentEntry, 0, len(rows))
+	for _, r := range rows {
+		entry := &creditsystemv1.CreditAdjustmentEntry{
+			Id:           r.ID.String(),
+			ResourceType: r.ResourceType,
+			Amount:       r.Amount,
+			CreatedAt:    r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		}
+		if r.Reason.Valid {
+			entry.Reason = r.Reason.String
+		}
+		if len(r.TbTransferID) == 16 {
+			entry.TransferId = fmt.Sprintf("%x", r.TbTransferID)
+		}
+		entries = append(entries, entry)
+	}
+	return connect.NewResponse(&creditsystemv1.ListCreditAdjustmentsResponse{Adjustments: entries}), nil
+}
+
 // ListClusters returns active workload clusters for a tenant.
 func (h *AdminHandler) ListClusters(
 	ctx context.Context,

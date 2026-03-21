@@ -38,3 +38,25 @@ ON CONFLICT (tenant_id, resource_type) DO NOTHING;
 -- name: InsertCreditAdjustment :exec
 INSERT INTO credit_adjustments (tenant_id, resource_type, amount, reason, tb_transfer_id)
 VALUES ($1, $2, $3, $4, $5);
+
+-- name: ListQuotaConfigsByTenant :many
+SELECT * FROM quota_configs WHERE tenant_id = $1;
+
+-- name: MarkSoftLimitAlertSent :exec
+UPDATE quota_configs
+SET soft_limit_alert_sent = TRUE
+WHERE tenant_id = $1 AND resource_type = $2;
+
+-- name: ResetSoftLimitAlert :exec
+UPDATE quota_configs
+SET soft_limit_alert_sent = FALSE
+WHERE tenant_id = $1 AND resource_type = $2;
+
+-- name: ListCreditAdjustmentsByTenant :many
+SELECT * FROM credit_adjustments
+WHERE tenant_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetAllQuotaSnapshots :many
+SELECT * FROM quota_snapshots
+ORDER BY tenant_id, resource_type;

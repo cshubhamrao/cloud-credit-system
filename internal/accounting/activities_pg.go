@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -144,4 +145,110 @@ func (a *PGActivities) InsertCreditAdjustment(ctx context.Context, input InsertC
 		sql.NullString{String: input.Reason, Valid: input.Reason != ""},
 		idCopy[:],
 	)
+}
+
+// CheckSoftLimitsInput carries snapshots to compare against configured soft limits.
+type CheckSoftLimitsInput struct {
+	TenantID  string
+	Snapshots map[string]QuotaSnapshotData
+}
+
+// CheckSoftLimits checks each resource snapshot against its soft limit in quota_configs.
+// On the first crossing it logs a warning and sets soft_limit_alert_sent to prevent
+// repeated alerts until credits are issued (which resets the flag via ResetSoftLimitAlert).
+func (a *PGActivities) CheckSoftLimits(ctx context.Context, input CheckSoftLimitsInput) error {
+	q := sqlcgen.New(a.db)
+	tenantUUID, err := uuid.Parse(input.TenantID)
+	if err != nil {
+		return fmt.Errorf("parse tenant UUID: %w", err)
+	}
+	configs, err := q.ListQuotaConfigsByTenant(ctx, tenantUUID)
+	if err != nil {
+		return fmt.Errorf("ListQuotaConfigsByTenant: %w", err)
+	}
+	for _, cfg := range configs {
+		if !cfg.SoftLimit.Valid || cfg.SoftLimitAlertSent {
+			continue
+		}
+		snap, ok := input.Snapshots[cfg.ResourceType]
+		if !ok {
+			continue
+		}
+		used := snap.DebitsPosted + snap.DebitsPending
+		if used >= cfg.SoftLimit.Int64 {
+			slog.Warn("soft limit reached",
+				"tenant", input.TenantID,
+				"resource", cfg.ResourceType,
+				"used", used,
+				"soft_limit", cfg.SoftLimit.Int64,
+			)
+			if err := q.MarkSoftLimitAlertSent(ctx, tenantUUID, cfg.ResourceType); err != nil {
+				return fmt.Errorf("MarkSoftLimitAlertSent %s: %w", cfg.ResourceType, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ResetSoftLimitAlertInput carries the tenant and resource to reset.
+type ResetSoftLimitAlertInput struct {
+	TenantID     string
+	ResourceType string
+}
+
+// ResetSoftLimitAlert clears the soft_limit_alert_sent flag after credits are issued,
+// so the alert can fire again if usage climbs back to the soft limit next cycle.
+func (a *PGActivities) ResetSoftLimitAlert(ctx context.Context, input ResetSoftLimitAlertInput) error {
+	q := sqlcgen.New(a.db)
+	tenantUUID, err := uuid.Parse(input.TenantID)
+	if err != nil {
+		return fmt.Errorf("parse tenant UUID: %w", err)
+	}
+	return q.ResetSoftLimitAlert(ctx, tenantUUID, input.ResourceType)
+}
+
+// UpdateClusterStatusInput carries the cluster ID and new status string.
+type UpdateClusterStatusInput struct {
+	ClusterID string
+	Status    string
+}
+
+// UpdateClusterStatus sets the status column of a workload cluster.
+func (a *PGActivities) UpdateClusterStatus(ctx context.Context, input UpdateClusterStatusInput) error {
+	q := sqlcgen.New(a.db)
+	clusterUUID, err := uuid.Parse(input.ClusterID)
+	if err != nil {
+		return fmt.Errorf("parse cluster UUID: %w", err)
+	}
+	return q.UpdateClusterStatus(ctx, clusterUUID, input.Status)
+}
+
+// DeregisterClusterInput carries the cluster ID to deregister.
+type DeregisterClusterInput struct {
+	ClusterID string
+}
+
+// DeregisterCluster marks a cluster as deregistered and records the timestamp.
+func (a *PGActivities) DeregisterCluster(ctx context.Context, input DeregisterClusterInput) error {
+	q := sqlcgen.New(a.db)
+	clusterUUID, err := uuid.Parse(input.ClusterID)
+	if err != nil {
+		return fmt.Errorf("parse cluster UUID: %w", err)
+	}
+	return q.DeregisterCluster(ctx, clusterUUID)
+}
+
+// DeleteTenantInput carries the tenant ID to soft-delete.
+type DeleteTenantInput struct {
+	TenantID string
+}
+
+// DeleteTenant soft-deletes a tenant (sets status=deregistered, deleted_at=NOW()).
+func (a *PGActivities) DeleteTenant(ctx context.Context, input DeleteTenantInput) error {
+	q := sqlcgen.New(a.db)
+	tenantUUID, err := uuid.Parse(input.TenantID)
+	if err != nil {
+		return fmt.Errorf("parse tenant UUID: %w", err)
+	}
+	return q.DeleteTenant(ctx, tenantUUID)
 }

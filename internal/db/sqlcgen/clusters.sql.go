@@ -7,9 +7,21 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
+
+const deregisterCluster = `-- name: DeregisterCluster :exec
+UPDATE workload_clusters
+SET status = 'deregistered', deregistered_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) DeregisterCluster(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deregisterCluster, id)
+	return err
+}
 
 const getCluster = `-- name: GetCluster :one
 SELECT id, tenant_id, cloud_provider, region, last_heartbeat, status, agent_version, deregistered_at, created_at FROM workload_clusters WHERE id = $1
@@ -99,6 +111,46 @@ func (q *Queries) ListClustersByTenant(ctx context.Context, tenantID uuid.UUID) 
 	return items, nil
 }
 
+const listStaleClusters = `-- name: ListStaleClusters :many
+SELECT id, tenant_id, cloud_provider, region, last_heartbeat, status, agent_version, deregistered_at, created_at FROM workload_clusters
+WHERE status NOT IN ('deregistered', 'suspended')
+  AND (last_heartbeat IS NULL OR last_heartbeat < $1)
+ORDER BY last_heartbeat
+`
+
+func (q *Queries) ListStaleClusters(ctx context.Context, lastHeartbeat sql.NullTime) ([]WorkloadCluster, error) {
+	rows, err := q.db.QueryContext(ctx, listStaleClusters, lastHeartbeat)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkloadCluster
+	for rows.Next() {
+		var i WorkloadCluster
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.CloudProvider,
+			&i.Region,
+			&i.LastHeartbeat,
+			&i.Status,
+			&i.AgentVersion,
+			&i.DeregisteredAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateClusterHeartbeat = `-- name: UpdateClusterHeartbeat :exec
 UPDATE workload_clusters
 SET last_heartbeat = NOW(), status = 'healthy'
@@ -107,5 +159,14 @@ WHERE id = $1
 
 func (q *Queries) UpdateClusterHeartbeat(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, updateClusterHeartbeat, id)
+	return err
+}
+
+const updateClusterStatus = `-- name: UpdateClusterStatus :exec
+UPDATE workload_clusters SET status = $2 WHERE id = $1
+`
+
+func (q *Queries) UpdateClusterStatus(ctx context.Context, iD uuid.UUID, status string) error {
+	_, err := q.db.ExecContext(ctx, updateClusterStatus, iD, status)
 	return err
 }

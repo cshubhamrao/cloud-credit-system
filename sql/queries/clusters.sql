@@ -15,3 +15,17 @@ ORDER BY created_at;
 UPDATE workload_clusters
 SET last_heartbeat = NOW(), status = 'healthy'
 WHERE id = $1;
+
+-- name: UpdateClusterStatus :exec
+UPDATE workload_clusters SET status = $2 WHERE id = $1;
+
+-- name: DeregisterCluster :exec
+UPDATE workload_clusters
+SET status = 'deregistered', deregistered_at = NOW()
+WHERE id = $1;
+
+-- name: ListStaleClusters :many
+SELECT * FROM workload_clusters
+WHERE status NOT IN ('deregistered', 'suspended')
+  AND (last_heartbeat IS NULL OR last_heartbeat < $1)
+ORDER BY last_heartbeat;

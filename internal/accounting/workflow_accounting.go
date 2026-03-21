@@ -346,6 +346,12 @@ func flushBatch(ctx workflow.Context, state *TenantAccountingState) error {
 		workflow.GetLogger(ctx).Warn("UpdateQuotaSnapshots failed (non-fatal)", "error", err)
 	}
 
+	// Check soft limits now that snapshots are current. Non-fatal.
+	softInput := CheckSoftLimitsInput{TenantID: state.TenantID, Snapshots: balResult.Balances}
+	if err := workflow.ExecuteActivity(actCtx, pgActivities.CheckSoftLimits, softInput).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Warn("CheckSoftLimits failed (non-fatal)", "error", err)
+	}
+
 	return nil
 }
 
@@ -389,6 +395,13 @@ func flushAdjustment(ctx workflow.Context, state *TenantAccountingState, sig Quo
 	}
 	if err := workflow.ExecuteActivity(actCtx, pgActivities.UpdateQuotaSnapshots, pgInput).Get(ctx, nil); err != nil {
 		workflow.GetLogger(ctx).Warn("UpdateQuotaSnapshots after adjustment failed (non-fatal)", "error", err)
+	}
+
+	// Credits issued — reset the soft-limit alert flag so it can fire again if
+	// usage climbs back up to the soft limit in the next billing cycle.
+	resetInput := ResetSoftLimitAlertInput{TenantID: state.TenantID, ResourceType: sig.ResourceType}
+	if err := workflow.ExecuteActivity(actCtx, pgActivities.ResetSoftLimitAlert, resetInput).Get(ctx, nil); err != nil {
+		workflow.GetLogger(ctx).Warn("ResetSoftLimitAlert failed (non-fatal)", "error", err)
 	}
 
 	return IssueCreditResult{Balances: balResult.Balances}, nil

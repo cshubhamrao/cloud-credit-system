@@ -12,6 +12,42 @@ import (
 	"github.com/google/uuid"
 )
 
+const getAllQuotaSnapshots = `-- name: GetAllQuotaSnapshots :many
+SELECT tenant_id, resource_type, credits_total, debits_posted, debits_pending, available, snapshot_at FROM quota_snapshots
+ORDER BY tenant_id, resource_type
+`
+
+func (q *Queries) GetAllQuotaSnapshots(ctx context.Context) ([]QuotaSnapshot, error) {
+	rows, err := q.db.QueryContext(ctx, getAllQuotaSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QuotaSnapshot
+	for rows.Next() {
+		var i QuotaSnapshot
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.ResourceType,
+			&i.CreditsTotal,
+			&i.DebitsPosted,
+			&i.DebitsPending,
+			&i.Available,
+			&i.SnapshotAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getGlobalTBAccount = `-- name: GetGlobalTBAccount :one
 SELECT tb_account_id FROM tb_global_account_ids
 WHERE resource_type = $1 AND account_type = $2
@@ -180,6 +216,101 @@ func (q *Queries) InsertTBAccountMapping(ctx context.Context, tenantID uuid.UUID
 		accountType,
 		tbAccountID,
 	)
+	return err
+}
+
+const listCreditAdjustmentsByTenant = `-- name: ListCreditAdjustmentsByTenant :many
+SELECT id, tenant_id, resource_type, amount, reason, tb_transfer_id, created_at FROM credit_adjustments
+WHERE tenant_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListCreditAdjustmentsByTenant(ctx context.Context, tenantID uuid.UUID) ([]CreditAdjustment, error) {
+	rows, err := q.db.QueryContext(ctx, listCreditAdjustmentsByTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CreditAdjustment
+	for rows.Next() {
+		var i CreditAdjustment
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ResourceType,
+			&i.Amount,
+			&i.Reason,
+			&i.TbTransferID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuotaConfigsByTenant = `-- name: ListQuotaConfigsByTenant :many
+SELECT tenant_id, resource_type, base_plan_id, hard_limit, soft_limit, burst_credits, billing_period, soft_limit_alert_sent FROM quota_configs WHERE tenant_id = $1
+`
+
+func (q *Queries) ListQuotaConfigsByTenant(ctx context.Context, tenantID uuid.UUID) ([]QuotaConfig, error) {
+	rows, err := q.db.QueryContext(ctx, listQuotaConfigsByTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QuotaConfig
+	for rows.Next() {
+		var i QuotaConfig
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.ResourceType,
+			&i.BasePlanID,
+			&i.HardLimit,
+			&i.SoftLimit,
+			&i.BurstCredits,
+			&i.BillingPeriod,
+			&i.SoftLimitAlertSent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markSoftLimitAlertSent = `-- name: MarkSoftLimitAlertSent :exec
+UPDATE quota_configs
+SET soft_limit_alert_sent = TRUE
+WHERE tenant_id = $1 AND resource_type = $2
+`
+
+func (q *Queries) MarkSoftLimitAlertSent(ctx context.Context, tenantID uuid.UUID, resourceType string) error {
+	_, err := q.db.ExecContext(ctx, markSoftLimitAlertSent, tenantID, resourceType)
+	return err
+}
+
+const resetSoftLimitAlert = `-- name: ResetSoftLimitAlert :exec
+UPDATE quota_configs
+SET soft_limit_alert_sent = FALSE
+WHERE tenant_id = $1 AND resource_type = $2
+`
+
+func (q *Queries) ResetSoftLimitAlert(ctx context.Context, tenantID uuid.UUID, resourceType string) error {
+	_, err := q.db.ExecContext(ctx, resetSoftLimitAlert, tenantID, resourceType)
 	return err
 }
 
