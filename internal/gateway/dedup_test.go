@@ -7,6 +7,30 @@ import (
 	"github.com/cshubhamrao/cloud-credit-system/internal/gateway"
 )
 
+// TestMemDedup_TTLPruning verifies that the pruneLoop evicts entries older than the TTL.
+// After eviction, the same seq is no longer considered a duplicate (fresh start).
+func TestMemDedup_TTLPruning(t *testing.T) {
+	ttl := 50 * time.Millisecond
+	d := gateway.NewMemDedup(ttl)
+
+	// First observation — not a duplicate.
+	if d.IsDuplicate("cluster-a", 7) {
+		t.Fatal("seq 7 should not be a duplicate on first observation")
+	}
+	// Immediately, same seq is a duplicate.
+	if !d.IsDuplicate("cluster-a", 7) {
+		t.Fatal("seq 7 should be a duplicate immediately after first observation")
+	}
+
+	// Wait long enough for pruneLoop to evict the entry (3× TTL is safe margin).
+	time.Sleep(3 * ttl)
+
+	// After eviction the entry is gone — seq 7 looks new again.
+	if d.IsDuplicate("cluster-a", 7) {
+		t.Error("seq 7 should not be a duplicate after TTL eviction")
+	}
+}
+
 func newTestDedup() *gateway.DedupCache {
 	// Use a large TTL so entries are never pruned during tests.
 	return gateway.NewDedupCache(1 * time.Hour)
