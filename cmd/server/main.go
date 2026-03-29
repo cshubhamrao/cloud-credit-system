@@ -50,6 +50,12 @@ func main() {
 	defer pool.Close()
 	log.Info("postgres connected", "dsn", cfg.PostgresDSN)
 
+	if err := db.RunMigrations(ctx, pool); err != nil {
+		log.Error("migrations failed", "error", err)
+		os.Exit(1)
+	}
+	log.Info("migrations applied")
+
 	// ─── TigerBeetle ────────────────────────────────────────────────────────
 	tbClient, err := ledger.NewClient(cfg.TigerBeetleCluster, cfg.TigerBeetleAddr)
 	must(err, "tigerbeetle")

@@ -30,17 +30,17 @@ func TestLoad_PostgresDSN_Override(t *testing.T) {
 }
 
 func TestLoad_TigerBeetleAddr_Override(t *testing.T) {
-	t.Setenv("TIGERBEETLE_ADDR", "10.0.0.1:4000")
+	t.Setenv("TIGERBEETLE_ADDR", "127.0.0.2:4000")
 	cfg := config.Load()
-	if cfg.TigerBeetleAddr != "10.0.0.1:4000" {
+	if cfg.TigerBeetleAddr != "127.0.0.2:4000" {
 		t.Errorf("TigerBeetleAddr = %q, want override value", cfg.TigerBeetleAddr)
 	}
 }
 
 func TestLoad_TemporalHost_Override(t *testing.T) {
-	t.Setenv("TEMPORAL_HOST", "temporal.internal:7233")
+	t.Setenv("TEMPORAL_HOST", "temporal.example.com:7233")
 	cfg := config.Load()
-	if cfg.TemporalHost != "temporal.internal:7233" {
+	if cfg.TemporalHost != "temporal.example.com:7233" {
 		t.Errorf("TemporalHost = %q, want override value", cfg.TemporalHost)
 	}
 }
@@ -62,9 +62,9 @@ func TestLoad_ListenAddr_Override(t *testing.T) {
 }
 
 func TestLoad_RedisAddr_Override(t *testing.T) {
-	t.Setenv("REDIS_ADDR", "redis.internal:6380")
+	t.Setenv("REDIS_ADDR", "redis.example.com:6380")
 	cfg := config.Load()
-	if cfg.RedisAddr != "redis.internal:6380" {
+	if cfg.RedisAddr != "redis.example.com:6380" {
 		t.Errorf("RedisAddr = %q, want override value", cfg.RedisAddr)
 	}
 }
@@ -95,11 +95,11 @@ func TestLoad_TigerBeetleCluster_AlwaysZero(t *testing.T) {
 
 func TestLoad_AllOverrides(t *testing.T) {
 	t.Setenv("POSTGRES_DSN", "postgres://a")
-	t.Setenv("TIGERBEETLE_ADDR", "1.2.3.4:3000")
-	t.Setenv("TEMPORAL_HOST", "t.host:7233")
+	t.Setenv("TIGERBEETLE_ADDR", "127.0.0.2:3000")
+	t.Setenv("TEMPORAL_HOST", "temporal.example.com:7233")
 	t.Setenv("TEMPORAL_NAMESPACE", "ns")
 	t.Setenv("LISTEN_ADDR", ":1234")
-	t.Setenv("REDIS_ADDR", "r.host:6379")
+	t.Setenv("REDIS_ADDR", "redis.example.com:6379")
 
 	cfg := config.Load()
 
@@ -113,11 +113,11 @@ func TestLoad_AllOverrides(t *testing.T) {
 	}
 	want := map[string]string{
 		"PostgresDSN":       "postgres://a",
-		"TigerBeetleAddr":   "1.2.3.4:3000",
-		"TemporalHost":      "t.host:7233",
+		"TigerBeetleAddr":   "127.0.0.2:3000",
+		"TemporalHost":      "temporal.example.com:7233",
 		"TemporalNamespace": "ns",
 		"ListenAddr":        ":1234",
-		"RedisAddr":         "r.host:6379",
+		"RedisAddr":         "redis.example.com:6379",
 	}
 	for field, got := range checks {
 		if got != want[field] {

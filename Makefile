@@ -60,20 +60,14 @@ docker-up:
 	@mkdir -p config/temporal
 	@cp -n config/temporal/development-sql.yaml.example config/temporal/development-sql.yaml 2>/dev/null || true
 	docker compose up -d
-	@echo "Waiting for services to be ready..."
-	@sleep 5
-	@$(MAKE) db-migrate
+	@echo "Services started. Migrations run automatically on server startup."
 
 docker-down:
 	docker compose down -v
 
 db-migrate:
-	@echo "Running database migrations..."
-	@for f in $$(ls sql/migrations/*.sql | sort); do \
-		echo "  applying $$f..."; \
-		PGPASSWORD=postgres psql -h localhost -U postgres -d creditdb -f $$f; \
-	done
-	@echo "Migrations complete."
+	@echo "Migrations are embedded in the server binary and run automatically on startup."
+	@echo "Start the server with 'make run' — no psql required."
 
 # ─── Test ────────────────────────────────────────────────────────────────────
 
