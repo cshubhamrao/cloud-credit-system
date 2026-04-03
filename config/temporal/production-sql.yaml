@@ -1,0 +1,16 @@
+frontend.enableUpdateWorkflowExecution:
+  - value: true
+    constraints: {}
+
+frontend.enableUpdateWorkflowExecutionAsyncAccepted:
+  - value: true
+    constraints: {}
+
+worker.workflowExecutionScavengerEnabled:
+  - value: true
+    constraints: {}
+
+# Run scavenger every hour in production (dev uses 15m)
+worker.executionScavengerInterval:
+  - value: 1h
+    constraints: {}

@@ -32,7 +32,7 @@ func main() {
 	defer tbClient.Close()
 	log.Info("tigerbeetle connected")
 
-	temporalClient, err := accounting.NewClient(cfg.TemporalHost, cfg.TemporalNamespace)
+	temporalClient, err := accounting.NewClient(cfg.TemporalHost, cfg.TemporalNamespace, cfg.TemporalAPIKey)
 	must(err, "temporal client")
 	defer temporalClient.Close()
 

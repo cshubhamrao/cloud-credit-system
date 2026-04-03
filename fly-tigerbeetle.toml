@@ -1,0 +1,16 @@
+app = "ccs-tigerbeetle"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile.tigerbeetle"
+
+[[vm]]
+  size = "performance-1x"
+
+# No [http_service] — TigerBeetle speaks its own binary protocol.
+# Accessible within the org via ccs-tigerbeetle.internal:3000 (Fly 6PN).
+
+[[mounts]]
+  source      = "tigerbeetle_data"
+  destination = "/data"
+  initial_size = "1gb"

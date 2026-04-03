@@ -1,18 +1,27 @@
 package accounting
 
 import (
+	"crypto/tls"
 	"fmt"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 )
 
-// NewClient creates a Temporal client.
-func NewClient(host, namespace string) (client.Client, error) {
-	c, err := client.Dial(client.Options{
+// NewClient creates a Temporal client. When apiKey is non-empty (Temporal Cloud),
+// TLS and API key credentials are enabled automatically.
+func NewClient(host, namespace, apiKey string) (client.Client, error) {
+	opts := client.Options{
 		HostPort:  host,
 		Namespace: namespace,
-	})
+	}
+	if apiKey != "" {
+		opts.Credentials = client.NewAPIKeyStaticCredentials(apiKey)
+		opts.ConnectionOptions = client.ConnectionOptions{
+			TLS: &tls.Config{},
+		}
+	}
+	c, err := client.Dial(opts)
 	if err != nil {
 		return nil, fmt.Errorf("temporal.Dial: %w", err)
 	}

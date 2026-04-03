@@ -1,0 +1,2 @@
+FROM temporalio/auto-setup:1.29
+COPY config/temporal/production-sql.yaml /etc/temporal/config/dynamicconfig/production-sql.yaml

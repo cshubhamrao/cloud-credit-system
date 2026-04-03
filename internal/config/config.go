@@ -11,6 +11,7 @@ type Config struct {
 	TigerBeetleCluster uint32
 	TemporalHost       string
 	TemporalNamespace  string
+	TemporalAPIKey     string
 	ListenAddr         string
 	RedisAddr          string
 }
@@ -22,6 +23,7 @@ func Load() Config {
 		TigerBeetleCluster: 0,
 		TemporalHost:       getEnv("TEMPORAL_HOST", "localhost:7233"),
 		TemporalNamespace:  getEnv("TEMPORAL_NAMESPACE", "default"),
+		TemporalAPIKey:     getEnv("TEMPORAL_API_KEY", ""),
 		ListenAddr:         getEnv("LISTEN_ADDR", ":8080"),
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
 	}

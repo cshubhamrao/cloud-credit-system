@@ -176,7 +176,9 @@ make test-integration # requires docker-compose services running
 | `TIGERBEETLE_ADDR`  | `127.0.0.1:3000`                                     | TigerBeetle address |
 | `TEMPORAL_HOST`     | `localhost:7233`                                     | Temporal gRPC address |
 | `TEMPORAL_NAMESPACE`| `default`                                            | Temporal namespace |
+| `TEMPORAL_API_KEY`  | `""`                                                 | Temporal Cloud API key (enables TLS + auth when set) |
 | `LISTEN_ADDR`       | `:8080`                                              | Server listen address |
+| `REDIS_ADDR`        | `localhost:6379`                                     | Valkey/Redis address for dedup cache (falls back to in-memory if unreachable) |
 | `SERVER_URL`        | `http://localhost:8080`                              | Simulator target URL |
 
 ---
@@ -222,7 +224,7 @@ Long-running, one instance per tenant. State:
 - `CurBatch []HeartbeatSignal` — accumulates between flushes
 - `LastAck uint64` — highest TB-committed sequence (returned by query handler)
 
-Flush trigger: 30s timer OR immediate on `QuotaAdjustmentSignal`.
+Flush trigger: adaptive timer (2s base, doubles to 60s when idle) OR immediate when batch reaches 150 OR on `QuotaAdjustmentSignal`.
 
 ### Activity Registration Pattern
 
@@ -262,7 +264,7 @@ reflection, matching the registration. Renaming the method is a compile error at
 | Four-eyes approval | Skipped |
 | Missed-heartbeat timers | Skipped |
 | Gauge pending transfers | **Implemented**: void+create pending in one TB batch per flush; PendingGaugeIDs tracked in workflow state |
-| Adaptive flush interval | **Implemented**: 5s base, doubles to 60s when idle; immediate flush at batch size ≥ 20 |
+| Adaptive flush interval | **Implemented**: 2s base, doubles to 60s when idle; immediate flush at batch size ≥ 150 |
 | Soft limit alerts | Logged to stdout |
 
 ---
