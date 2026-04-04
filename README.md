@@ -313,6 +313,77 @@ make test-integration # requires docker-compose services running
 
 ---
 
+## Deploying to Fly.io
+
+The app runs as a **single Fly app with three process groups** — each group on its own machine.
+No separate apps, no cross-app private networking.
+
+```
+fly app: ccs
+├── tb       — TigerBeetle ledger       (performance-1x, 2 GB, persistent volume)
+├── temporal — Temporal + auto-setup    (shared-cpu-4x, 1 GB)
+└── app      — Go server + worker       (shared-cpu-1x, 256 MB)
+```
+
+Internal DNS between groups uses Fly's process-group format: `<group>.process.<app>.internal`.
+
+### One-time setup
+
+```bash
+# 1. Create the app
+fly apps create ccs
+
+# 2. Create a Postgres cluster and attach it (sets POSTGRES_DSN secret automatically)
+fly postgres create --name ccs-db --region bom
+fly postgres attach ccs-db --app ccs
+
+# 3. Persistent volume for TigerBeetle data
+fly volumes create tb_data --region bom --size 10 --app ccs
+
+# 4. Set remaining secrets
+fly secrets set --app ccs \
+  POSTGRES_SEEDS="ccs-db.internal" \
+  POSTGRES_USER="<user>" \
+  POSTGRES_PWD="<password>" \
+  API_TOKEN="<your-token>"
+```
+
+> `POSTGRES_SEEDS`, `POSTGRES_USER`, and `POSTGRES_PWD` are used by Temporal's auto-setup to
+> create its own databases on the shared Postgres cluster. `POSTGRES_DSN` (set by `fly postgres attach`)
+> is used by the Go server.
+
+### Deploy
+
+```bash
+fly deploy
+```
+
+Fly builds a single image from `Dockerfile` and distributes it across all three machines.
+The `[processes]` section in `fly.toml` selects which entrypoint runs on each group.
+
+### Health checks
+
+| Check | Type | What it verifies |
+|-------|------|-----------------|
+| `tb-alive` | TCP :3000 | TigerBeetle process is up |
+| `temporal-alive` | TCP :7233 | Temporal gRPC frontend is up |
+| `temporal-ready` | HTTP GET :7243 `/api/v1/system-info` | Temporal is fully initialized |
+| `app-alive` | TCP :8080 | Go server process is up |
+| `app-stats` | HTTP GET :8080 `/api/ui/stats` + `Authorization` header | Server is healthy and authenticated endpoints respond |
+
+Temporal has a 300 s grace period — auto-setup runs schema migrations against Postgres before
+the gRPC port opens.
+
+### Monitoring
+
+```bash
+fly logs --app ccs                        # all machines
+fly logs --app ccs --machine <id>         # single machine
+fly machine list --app ccs                # health check status per machine
+```
+
+---
+
 ## Further Reading
 
 | Document | Description |

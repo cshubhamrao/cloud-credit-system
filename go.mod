@@ -18,7 +18,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/klauspost/compress v1.18.4
 	github.com/stretchr/testify v1.11.1
-	github.com/tigerbeetle/tigerbeetle-go v0.16.11
+	github.com/tigerbeetle/tigerbeetle-go v0.16.78
 	github.com/valkey-io/valkey-glide/go/v2 v2.3.0
 	github.com/zeebo/blake3 v0.2.4
 	go.temporal.io/api v1.62.2

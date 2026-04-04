@@ -1,29 +1,117 @@
-app = "ccs-server"
-primary_region = "sjc"
+app            = "ccs"
+primary_region = "bom"
 
 [build]
+  dockerfile = "Dockerfile"
+
+# ── Process groups ─────────────────────────────────────────────────────────
+# Each group runs one process as PID 1 on its own machine.
+# Fly monitors and restarts the machine if the process exits.
+[processes]
+  tb       = "/tb-start.sh"
+  temporal = "/temporal-start.sh"
+  app      = "/server"
+
+# ── VM sizing ──────────────────────────────────────────────────────────────
+[[vm]]
+  processes = ["tb"]
+  size      = "performance-1x"
+  memory    = "2048mb"
 
 [[vm]]
-  size = "performance-1x"
+  processes = ["temporal"]
+  size      = "shared-cpu-4x"
+  memory    = "1024mb"
 
+[[vm]]
+  processes = ["app"]
+  size      = "shared-cpu-1x"
+  memory    = "256mb"
+
+# ── Health checks ──────────────────────────────────────────────────────────
+[checks.tb-alive]
+  type         = "tcp"
+  port         = 3000
+  interval     = "15s"
+  timeout      = "5s"
+  grace_period = "30s"
+  processes    = ["tb"]
+
+[checks.temporal-alive]
+  type         = "tcp"
+  port         = 7233
+  interval     = "15s"
+  timeout      = "5s"
+  grace_period = "300s"
+  processes    = ["temporal"]
+
+[checks.temporal-ready]
+  type         = "http"
+  port         = 7243
+  method       = "GET"
+  path         = "/api/v1/system-info"
+  interval     = "30s"
+  timeout      = "5s"
+  grace_period = "300s"
+  processes    = ["temporal"]
+
+[checks.app-alive]
+  type         = "tcp"
+  port         = 8080
+  interval     = "15s"
+  timeout      = "5s"
+  grace_period = "30s"
+  processes    = ["app"]
+
+[checks.app-stats]
+  type         = "http"
+  port         = 8080
+  method       = "GET"
+  path         = "/api/ui/stats"
+  interval     = "30s"
+  timeout      = "5s"
+  grace_period = "60s"
+  processes    = ["app"]
+  [checks.app-stats.headers]
+    Authorization = "Bearer ccs-demo-token-2026"
+
+# ── Volume for TigerBeetle ledger data ────────────────────────────────────
+[[mounts]]
+  processes   = ["tb"]
+  source      = "tb_data"
+  destination = "/data"
+
+# ── Public HTTP (app group only) ──────────────────────────────────────────
 [http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 1
+  processes            = ["app"]
+  internal_port        = 8080
+  force_https          = true
+  auto_stop_machines   = "stop"
+  auto_start_machines  = true
+  min_machines_running = 0
 
-  [[http_service.checks]]
-    interval = "15s"
-    timeout  = "5s"
-    grace_period = "20s"
-    method   = "GET"
-    path     = "/api/ui/stats"
+  # TCP check — Go server retries Temporal for up to 150s on startup.
+  [[http_service.tcp_checks]]
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "180s"
 
+# ── Environment ────────────────────────────────────────────────────────────
 [env]
-  LISTEN_ADDR = ":8080"
-  TEMPORAL_HOST      = "ccs-temporal.internal:7233"
+  LISTEN_ADDR        = ":8080"
   TEMPORAL_NAMESPACE = "default"
-  # Secrets (set via `fly secrets set`):
-  #   POSTGRES_DSN       — from `fly postgres attach`
-  #   TIGERBEETLE_ADDR   — ccs-tigerbeetle.internal:3000
+  # Reach each process group via Fly's internal process-group DNS.
+  TEMPORAL_HOST    = "temporal.process.ccs.internal:7233"
+  TIGERBEETLE_ADDR = "tb.process.ccs.internal:3000"
+  # Temporal auto-setup DB config (Temporal creates its own databases).
+  DB                          = "postgres12"
+  DB_PORT                     = "5432"
+  DEFAULT_NAMESPACE_RETENTION = "72h"
+  DYNAMIC_CONFIG_FILE_PATH    = "config/dynamicconfig/production-sql.yaml"
+  TEMPORAL_HOME               = "/etc/temporal"
+  # Secrets — set via: fly secrets set --app ccs KEY=value
+  #   POSTGRES_DSN    — app DB connection string (from: fly postgres attach ccs-db)
+  #   POSTGRES_SEEDS  — Temporal DB host          (e.g. ccs-db.internal)
+  #   POSTGRES_USER   — shared DB user
+  #   POSTGRES_PWD    — shared DB password
+  #   API_TOKEN       — bearer token for the web UI / API

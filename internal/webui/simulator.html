@@ -96,9 +96,35 @@
     .mono      { font-family: monospace; }
     .hstack    { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .danger-text { color: #f87171; }
+
+    /* ── Auth overlay ─────────────────────────────────────────────────────── */
+    #auth-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 9999;
+      align-items: center; justify-content: center;
+    }
+    #auth-overlay.visible { display: flex; }
+    #auth-box {
+      background: var(--bg-color, #fff);
+      border: 1px solid var(--border-color, #ccc);
+      border-radius: 10px; padding: 32px 28px; min-width: 320px;
+    }
+    #auth-box h3 { margin: 0 0 6px; font-size: 1rem; }
+    #auth-box p  { margin: 0 0 16px; font-size: .8rem; opacity: .55; }
+    #auth-input  { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
   </style>
 </head>
 <body>
+
+<!-- ── Auth overlay ────────────────────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div id="auth-box">
+    <h3>API Token required</h3>
+    <p>Enter your bearer token to access the dashboard.</p>
+    <input id="auth-input" type="password" class="input" placeholder="Bearer token" autocomplete="current-password">
+    <button class="btn" onclick="submitToken()" style="width:100%">Connect</button>
+  </div>
+</div>
 
 <!-- ── Header ─────────────────────────────────────────────────────────────── -->
 <header id="site-header">
@@ -369,9 +395,41 @@ Examples:
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
+// ── Auth ─────────────────────────────────────────────────────────────────────
+const TOKEN_KEY = 'ccs_api_token';
+function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function showAuthOverlay() {
+  document.getElementById('auth-overlay').classList.add('visible');
+  document.getElementById('auth-input').focus();
+}
+function submitToken() {
+  const val = document.getElementById('auth-input').value.trim();
+  if (!val) return;
+  localStorage.setItem(TOKEN_KEY, val);
+  document.getElementById('auth-overlay').classList.remove('visible');
+  document.getElementById('auth-input').value = '';
+  pollDashboard();
+}
+document.getElementById('auth-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitToken();
+});
+
+async function authFetch(url, opts = {}) {
+  const token = getToken();
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(url, { ...opts, headers });
+  if (resp.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    showAuthOverlay();
+    throw new Error('unauthorized');
+  }
+  return resp;
+}
+
 // ── RPC ─────────────────────────────────────────────────────────────────────
 async function rpc(svc, method, body = {}) {
-  const resp = await fetch(`/creditsystem.v1.${svc}/${method}`, {
+  const resp = await authFetch(`/creditsystem.v1.${svc}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -482,8 +540,8 @@ function evalExpr(expr, seq, t) {
 async function pollDashboard() {
   try {
     const [rt, report, { tenants: freshTenants }] = await Promise.all([
-      fetch('/api/ui/stats').then(r => r.json()),
-      fetch('/api/ui/report').then(r => r.json()),
+      authFetch('/api/ui/stats').then(r => r.json()),
+      authFetch('/api/ui/report').then(r => r.json()),
       admin('ListTenants'),
     ]);
 
@@ -1018,6 +1076,8 @@ document.getElementById('form-credit').addEventListener('submit', async e => {
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+if (!getToken()) showAuthOverlay();
+
 (async () => {
   try {
     await loadTenants();

@@ -21,7 +21,10 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	"crypto/subtle"
+
 	"connectrpc.com/connect"
+	"go.temporal.io/sdk/client"
 
 	"github.com/cshubhamrao/cloud-credit-system/gen/creditsystem/v1/creditsystemv1connect"
 	"github.com/cshubhamrao/cloud-credit-system/internal/accounting"
@@ -57,8 +60,20 @@ func main() {
 	log.Info("migrations applied")
 
 	// ─── TigerBeetle ────────────────────────────────────────────────────────
-	tbClient, err := ledger.NewClient(cfg.TigerBeetleCluster, cfg.TigerBeetleAddr)
-	must(err, "tigerbeetle")
+	// Retry up to 30×5s=150s so the tb machine has time to come up.
+	var tbClient *ledger.Client
+	for attempt := 1; attempt <= 30; attempt++ {
+		tbClient, err = ledger.NewClient(cfg.TigerBeetleCluster, cfg.TigerBeetleAddr)
+		if err == nil {
+			break
+		}
+		if attempt == 30 {
+			log.Error("startup error", "component", "tigerbeetle", "error", err)
+			os.Exit(1)
+		}
+		log.Warn("tigerbeetle not ready, retrying", "attempt", attempt, "error", err)
+		time.Sleep(5 * time.Second)
+	}
 	defer tbClient.Close()
 	log.Info("tigerbeetle connected", "addr", cfg.TigerBeetleAddr)
 
@@ -74,8 +89,21 @@ func main() {
 	log.Info("global TB accounts ready", "count", len(globalAccounts))
 
 	// ─── Temporal ────────────────────────────────────────────────────────────
-	temporalClient, err := accounting.NewClient(cfg.TemporalHost, cfg.TemporalNamespace, cfg.TemporalAPIKey)
-	must(err, "temporal client")
+	// Retry up to 30×5s=150s so co-located Temporal has time to finish its
+	// schema migrations before the server gives up.
+	var temporalClient client.Client
+	for attempt := 1; attempt <= 30; attempt++ {
+		temporalClient, err = accounting.NewClient(cfg.TemporalHost, cfg.TemporalNamespace, cfg.TemporalAPIKey)
+		if err == nil {
+			break
+		}
+		if attempt == 30 {
+			log.Error("startup error", "component", "temporal client", "error", err)
+			os.Exit(1)
+		}
+		log.Warn("temporal not ready, retrying", "attempt", attempt, "error", err)
+		time.Sleep(5 * time.Second)
+	}
 	defer temporalClient.Close()
 
 	tbActs := accounting.NewTBActivities(tbClient)
@@ -219,7 +247,7 @@ func main() {
 	h2s := &http2.Server{}
 	srv := &http.Server{
 		Addr:    cfg.ListenAddr,
-		Handler: h2c.NewHandler(mux, h2s),
+		Handler: h2c.NewHandler(bearerAuth(cfg.APIToken, mux), h2s),
 	}
 
 	log.Info("server listening", "addr", cfg.ListenAddr)
@@ -240,6 +268,29 @@ func main() {
 	}
 	_ = debugSrv.Shutdown(shutdownCtx)
 	log.Info("server stopped")
+}
+
+// bearerAuth is an HTTP middleware that requires "Authorization: Bearer <token>"
+// on all requests except GET /sim and /ui (so the page loads and can prompt).
+// When token is empty the middleware is a no-op (auth disabled locally).
+func bearerAuth(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && (r.URL.Path == "/sim" || r.URL.Path == "/ui") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func must(err error, label string) {

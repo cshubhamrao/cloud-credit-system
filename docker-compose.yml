@@ -55,7 +55,7 @@ services:
       retries: 10
 
   tigerbeetle:
-    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.78
     command: >
       start
       --addresses=0.0.0.0:3000

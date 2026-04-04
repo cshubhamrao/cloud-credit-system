@@ -14,6 +14,7 @@ type Config struct {
 	TemporalAPIKey     string
 	ListenAddr         string
 	RedisAddr          string
+	APIToken           string // empty = auth disabled
 }
 
 func Load() Config {
@@ -26,6 +27,7 @@ func Load() Config {
 		TemporalAPIKey:     getEnv("TEMPORAL_API_KEY", ""),
 		ListenAddr:         getEnv("LISTEN_ADDR", ":8080"),
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		APIToken:           getEnv("API_TOKEN", ""),
 	}
 }
 
