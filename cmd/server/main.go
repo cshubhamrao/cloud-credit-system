@@ -44,6 +44,9 @@ func main() {
 	slog.SetDefault(log)
 
 	cfg := config.Load()
+
+	// Register signal handlers FIRST, before any blocking I/O, so that
+	// SIGTERM / SIGINT cancels the context even if we are mid-connect.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -61,8 +64,12 @@ func main() {
 
 	// ─── TigerBeetle ────────────────────────────────────────────────────────
 	// Retry up to 30×5s=150s so the tb machine has time to come up.
+	// Each inter-retry sleep is context-aware: SIGTERM exits immediately.
 	var tbClient *ledger.Client
 	for attempt := 1; attempt <= 30; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
 		tbClient, err = ledger.NewClient(cfg.TigerBeetleCluster, cfg.TigerBeetleAddr)
 		if err == nil {
 			break
@@ -72,7 +79,11 @@ func main() {
 			os.Exit(1)
 		}
 		log.Warn("tigerbeetle not ready, retrying", "attempt", attempt, "error", err)
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 	defer tbClient.Close()
 	log.Info("tigerbeetle connected", "addr", cfg.TigerBeetleAddr)
@@ -91,8 +102,12 @@ func main() {
 	// ─── Temporal ────────────────────────────────────────────────────────────
 	// Retry up to 30×5s=150s so co-located Temporal has time to finish its
 	// schema migrations before the server gives up.
+	// Each inter-retry sleep is context-aware: SIGTERM exits immediately.
 	var temporalClient client.Client
 	for attempt := 1; attempt <= 30; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
 		temporalClient, err = accounting.NewClient(cfg.TemporalHost, cfg.TemporalNamespace, cfg.TemporalAPIKey)
 		if err == nil {
 			break
@@ -102,7 +117,11 @@ func main() {
 			os.Exit(1)
 		}
 		log.Warn("temporal not ready, retrying", "attempt", attempt, "error", err)
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 	defer temporalClient.Close()
 

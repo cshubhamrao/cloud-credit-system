@@ -6,6 +6,10 @@ frontend.enableUpdateWorkflowExecutionAsyncAccepted:
   - value: true
     constraints: {}
 
+frontend.workerHeartbeatsEnabled:
+  - value: true
+    constraints: {}
+
 worker.workflowExecutionScavengerEnabled:
   - value: true
     constraints: {}

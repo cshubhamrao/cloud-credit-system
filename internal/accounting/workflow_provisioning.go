@@ -8,6 +8,9 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/cshubhamrao/cloud-credit-system/internal/domain"
+	"github.com/cshubhamrao/cloud-credit-system/internal/ledger"
 )
 
 // TenantProvisioningInput carries everything needed to bootstrap a new tenant.
@@ -75,12 +78,24 @@ func TenantProvisioningWorkflow(ctx workflow.Context, input TenantProvisioningIn
 	}
 
 	// Step 4: Load the wallet with initial allocation transfers.
+	// Pre-generate deterministic transfer IDs using (tenantUUID, periodStartNs, ledgerID)
+	// so Temporal activity retries are idempotent (invariant I-5). PeriodStartNs is
+	// unique per tenant lifecycle, making the combination globally unique.
+	allocTransferIDs := make(map[string][16]byte)
+	for r := range input.Credits {
+		resource := domain.ResourceType(r)
+		seqNo := uint64(input.PeriodStartNs)
+		allocTransferIDs[r] = ledger.Uint128ToBytes(
+			ledger.DeriveAllocationTransferID(input.TenantUUID, seqNo, resource.LedgerID()),
+		)
+	}
 	allocInput := SubmitAllocationInput{
 		TenantUUID:        input.TenantUUID,
 		TenantQuotaIDs:    tbResult.AccountIDs,
 		GlobalOperatorIDs: input.GlobalOperatorIDs,
 		Credits:           input.Credits,
 		PeriodStartNs:     input.PeriodStartNs,
+		TransferIDs:       allocTransferIDs,
 	}
 	if err := workflow.ExecuteActivity(ctx, tbActivities.SubmitAllocationTransfers, allocInput).Get(ctx, nil); err != nil {
 		return TenantProvisioningResult{}, fmt.Errorf("SubmitAllocationTransfers: %w", err)

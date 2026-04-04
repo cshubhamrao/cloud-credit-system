@@ -30,12 +30,81 @@ func DeriveTransferID(clusterID [16]byte, seq uint64, ledgerID uint32) types.Uin
 }
 
 // RandomID generates a random-looking but time-ordered 128-bit ID.
-// Used for allocation and adjustment transfers where idempotency is handled
-// by the Temporal workflow (not by deterministic IDs).
+// Only use for transfers where a deterministic derive function is not applicable.
 func RandomID() types.Uint128 {
 	// TigerBeetle recommends time-based IDs for good LSM performance.
 	// Use the tigerbeetle-go helper.
 	return types.ID()
+}
+
+// DeriveAllocationTransferID produces a deterministic 128-bit ID for a quota
+// allocation or adjustment transfer. Using a deterministic ID means Temporal
+// activity retries are idempotent — TigerBeetle returns TransferExists on the
+// second attempt instead of creating a duplicate credit (invariant I-5).
+//
+// Inputs must uniquely identify one allocation event:
+//   - tenantUUID: the tenant being credited
+//   - seqNo: a monotonically increasing counter (FlushSeqNo in the accounting
+//     workflow; PeriodStartNs cast to uint64 in the provisioning workflow)
+//   - ledgerID: the resource ledger (one per resource type)
+//
+// Layout: blake3("alloc" || tenantUUID || seqNo_le64 || ledger_le32), first 16 bytes.
+func DeriveAllocationTransferID(tenantUUID [16]byte, seqNo uint64, ledgerID uint32) types.Uint128 {
+	h := blake3.New()
+	h.Write([]byte("alloc"))
+	h.Write(tenantUUID[:])
+	var seqBuf [8]byte
+	binary.LittleEndian.PutUint64(seqBuf[:], seqNo)
+	h.Write(seqBuf[:])
+	var ledBuf [4]byte
+	binary.LittleEndian.PutUint32(ledBuf[:], ledgerID)
+	h.Write(ledBuf[:])
+	var sum [32]byte
+	h.Sum(sum[:0])
+	return bytesToUint128(sum[:16])
+}
+
+// DeriveGaugePendingID produces a deterministic 128-bit ID for a new pending
+// gauge reservation transfer. Combined with DeriveGaugeVoidID, this makes the
+// void+create pair idempotent on Temporal activity retry (invariant I-5).
+//
+// Layout: blake3("gauge-pending" || tenantUUID || seqNo_le64 || clusterUUID || ledger_le32), first 16 bytes.
+func DeriveGaugePendingID(tenantUUID [16]byte, seqNo uint64, clusterUUID [16]byte, ledgerID uint32) types.Uint128 {
+	h := blake3.New()
+	h.Write([]byte("gauge-pending"))
+	h.Write(tenantUUID[:])
+	var seqBuf [8]byte
+	binary.LittleEndian.PutUint64(seqBuf[:], seqNo)
+	h.Write(seqBuf[:])
+	h.Write(clusterUUID[:])
+	var ledBuf [4]byte
+	binary.LittleEndian.PutUint32(ledBuf[:], ledgerID)
+	h.Write(ledBuf[:])
+	var sum [32]byte
+	h.Sum(sum[:0])
+	return bytesToUint128(sum[:16])
+}
+
+// DeriveGaugeVoidID produces a deterministic 128-bit ID for the void transfer
+// that releases an old pending gauge reservation. Using the same domain separator
+// as DeriveGaugePendingID but with "gauge-void" ensures no collision between the
+// void and the new pending transfer within the same flush.
+//
+// Layout: blake3("gauge-void" || tenantUUID || seqNo_le64 || clusterUUID || ledger_le32), first 16 bytes.
+func DeriveGaugeVoidID(tenantUUID [16]byte, seqNo uint64, clusterUUID [16]byte, ledgerID uint32) types.Uint128 {
+	h := blake3.New()
+	h.Write([]byte("gauge-void"))
+	h.Write(tenantUUID[:])
+	var seqBuf [8]byte
+	binary.LittleEndian.PutUint64(seqBuf[:], seqNo)
+	h.Write(seqBuf[:])
+	h.Write(clusterUUID[:])
+	var ledBuf [4]byte
+	binary.LittleEndian.PutUint32(ledBuf[:], ledgerID)
+	h.Write(ledBuf[:])
+	var sum [32]byte
+	h.Sum(sum[:0])
+	return bytesToUint128(sum[:16])
 }
 
 // UUIDToUint128 converts a 16-byte UUID to a TigerBeetle Uint128.

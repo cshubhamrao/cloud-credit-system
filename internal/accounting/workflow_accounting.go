@@ -6,6 +6,9 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/cshubhamrao/cloud-credit-system/internal/domain"
+	"github.com/cshubhamrao/cloud-credit-system/internal/ledger"
 )
 
 const (
@@ -59,6 +62,12 @@ type TenantAccountingState struct {
 	// the remaining balance is smaller than any single heartbeat delta — the account
 	// has "crumbs" that are arithmetically unreachable. Cleared on credit issuance.
 	ExceededResources map[string]bool
+
+	// FlushSeqNo is a monotonically increasing counter incremented before each
+	// flushBatch or flushAdjustment call. Used to derive deterministic TigerBeetle
+	// transfer IDs for allocation and gauge pending/void transfers so that Temporal
+	// activity retries reuse the same IDs (invariant I-5).
+	FlushSeqNo uint64
 }
 
 // TenantAccountingInput is the workflow start parameter.
@@ -70,10 +79,11 @@ type TenantAccountingInput struct {
 	GlobalOperatorIDs map[string][16]byte
 	GlobalSinkIDs     map[string][16]byte
 	// Carry* fields are zero on first start; populated on Continue-As-New.
-	CarryProcessedSeqs    map[string]uint64
-	CarryPendingGaugeIDs  map[string]map[string][16]byte
+	CarryProcessedSeqs     map[string]uint64
+	CarryPendingGaugeIDs   map[string]map[string][16]byte
 	CarryExceededResources map[string]bool
-	CarryLastAck          uint64
+	CarryLastAck           uint64
+	CarryFlushSeqNo        uint64
 }
 
 // TenantAccountingWorkflow is the core long-running workflow.
@@ -107,6 +117,7 @@ func TenantAccountingWorkflow(ctx workflow.Context, input TenantAccountingInput)
 		PendingGaugeIDs:      pendingGaugeIDs,
 		ExceededResources:    exceededResources,
 		LastAck:              input.CarryLastAck,
+		FlushSeqNo:           input.CarryFlushSeqNo,
 		CurrentFlushInterval: baseFlushInterval,
 	}
 
@@ -253,6 +264,7 @@ func TenantAccountingWorkflow(ctx workflow.Context, input TenantAccountingInput)
 				CarryPendingGaugeIDs:   state.PendingGaugeIDs,
 				CarryExceededResources: state.ExceededResources,
 				CarryLastAck:           state.LastAck,
+				CarryFlushSeqNo:        state.FlushSeqNo,
 			})
 		}
 	}
@@ -273,14 +285,44 @@ func flushBatch(ctx workflow.Context, state *TenantAccountingState) error {
 	}
 	actCtx := workflow.WithActivityOptions(ctx, ao)
 
+	// Increment FlushSeqNo before generating IDs so retries of this activity
+	// produce identical IDs regardless of how many times Temporal retries (I-5).
+	state.FlushSeqNo++
+	seqNo := state.FlushSeqNo
+
+	// Pre-generate deterministic IDs for gauge pending and void transfers.
+	// The IDs are stable for this flush — same seqNo, same clusterUUID, same ledgerID
+	// → same hash output on every retry attempt.
+	newGaugePendingIDs := make(map[string]map[string][16]byte)
+	gaugeVoidIDs := make(map[string]map[string][16]byte)
+	for _, hb := range state.CurBatch {
+		for _, r := range domain.AllResources {
+			if !r.IsGauge() {
+				continue
+			}
+			if newGaugePendingIDs[hb.ClusterID] == nil {
+				newGaugePendingIDs[hb.ClusterID] = make(map[string][16]byte)
+				gaugeVoidIDs[hb.ClusterID] = make(map[string][16]byte)
+			}
+			newGaugePendingIDs[hb.ClusterID][string(r)] = ledger.Uint128ToBytes(
+				ledger.DeriveGaugePendingID(state.TenantUUID, seqNo, hb.ClusterUUID, r.LedgerID()),
+			)
+			gaugeVoidIDs[hb.ClusterID][string(r)] = ledger.Uint128ToBytes(
+				ledger.DeriveGaugeVoidID(state.TenantUUID, seqNo, hb.ClusterUUID, r.LedgerID()),
+			)
+		}
+	}
+
 	input := TBBatchInput{
-		TenantID:          state.TenantID,
-		TenantUUID:        state.TenantUUID,
-		AccountMap:        TBAccountMap{TenantQuotaIDs: state.AccountMap},
-		Heartbeats:        state.CurBatch,
-		GlobalOperatorIDs: state.GlobalOperatorIDs,
-		GlobalSinkIDs:     state.GlobalSinkIDs,
-		PendingGaugeIDs:   state.PendingGaugeIDs,
+		TenantID:           state.TenantID,
+		TenantUUID:         state.TenantUUID,
+		AccountMap:         TBAccountMap{TenantQuotaIDs: state.AccountMap},
+		Heartbeats:         state.CurBatch,
+		GlobalOperatorIDs:  state.GlobalOperatorIDs,
+		GlobalSinkIDs:      state.GlobalSinkIDs,
+		PendingGaugeIDs:    state.PendingGaugeIDs,
+		NewGaugePendingIDs: newGaugePendingIDs,
+		GaugeVoidIDs:       gaugeVoidIDs,
 	}
 
 	var result TBBatchResult
@@ -365,6 +407,16 @@ func flushAdjustment(ctx workflow.Context, state *TenantAccountingState, sig Quo
 	}
 	actCtx := workflow.WithActivityOptions(ctx, ao)
 
+	// Increment FlushSeqNo before generating the transfer ID so retries reuse
+	// the same deterministic ID (invariant I-5).
+	state.FlushSeqNo++
+	seqNo := state.FlushSeqNo
+
+	resource := domain.ResourceType(sig.ResourceType)
+	transferID := ledger.Uint128ToBytes(
+		ledger.DeriveAllocationTransferID(state.TenantUUID, seqNo, resource.LedgerID()),
+	)
+
 	quotaBytes := state.AccountMap[sig.ResourceType]
 	opBytes := state.GlobalOperatorIDs[sig.ResourceType]
 
@@ -373,6 +425,7 @@ func flushAdjustment(ctx workflow.Context, state *TenantAccountingState, sig Quo
 		TenantQuotaIDs:    map[string][16]byte{sig.ResourceType: quotaBytes},
 		GlobalOperatorIDs: map[string][16]byte{sig.ResourceType: opBytes},
 		Credits:           map[string]int64{sig.ResourceType: sig.Amount},
+		TransferIDs:       map[string][16]byte{sig.ResourceType: transferID},
 	}
 	if err := workflow.ExecuteActivity(actCtx, tbActivities.SubmitAllocationTransfers, allocInput).Get(ctx, nil); err != nil {
 		return IssueCreditResult{}, err

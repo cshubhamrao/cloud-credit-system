@@ -40,6 +40,9 @@ type AllocationTransfer struct {
 	Code          domain.TransferCode
 	TenantUUID    [16]byte
 	PeriodStartNs uint64
+	// TransferID is the deterministic idempotency key for this transfer (I-5).
+	// If zero, RandomID() is used as a fallback (not safe for Temporal retries).
+	TransferID types.Uint128
 }
 
 // SubmitUsageBatch submits a batch of usage transfers and returns per-transfer results.
@@ -69,8 +72,14 @@ func SubmitUsageBatch(c *Client, transfers []UsageTransfer) ([]TransferResult, e
 func SubmitAllocations(c *Client, allocations []AllocationTransfer) ([]TransferResult, error) {
 	tbTransfers := make([]types.Transfer, len(allocations))
 	for i, a := range allocations {
+		id := a.TransferID
+		if id == (types.Uint128{}) {
+			// Fallback: no deterministic ID provided. Safe only when the caller
+			// guarantees at-most-once execution (not inside a Temporal activity).
+			id = RandomID()
+		}
 		tbTransfers[i] = types.Transfer{
-			ID:              RandomID(),
+			ID:              id,
 			DebitAccountID:  a.OperatorID,
 			CreditAccountID: a.TenantQuotaID,
 			Amount:          types.ToUint128(a.Amount),
@@ -99,6 +108,12 @@ type GaugePendingUpdate struct {
 	NewAmount     uint64
 	ClusterUUID   [16]byte
 	HeartbeatTsNs uint64
+	// NewPendingID is the deterministic ID for the new pending transfer (I-5).
+	// If zero, RandomID() is used as a fallback (not safe for Temporal retries).
+	NewPendingID types.Uint128
+	// VoidTransferID is the deterministic ID for the void transfer itself (I-5).
+	// If zero, RandomID() is used as a fallback.
+	VoidTransferID types.Uint128
 }
 
 // GaugePendingResult is the per-update outcome of SubmitGaugePendingUpdates.
@@ -130,15 +145,23 @@ func SubmitGaugePendingUpdates(c *Client, updates []GaugePendingUpdate) ([]Gauge
 	var tbTransfers []types.Transfer
 	var metas []meta
 	newPendingIDs := make([]types.Uint128, len(updates))
-	for i := range updates {
-		newPendingIDs[i] = RandomID()
+	for i, u := range updates {
+		if u.NewPendingID != (types.Uint128{}) {
+			newPendingIDs[i] = u.NewPendingID
+		} else {
+			newPendingIDs[i] = RandomID()
+		}
 	}
 
 	for i, u := range updates {
 		// Void old pending first so its capacity is released before the new one lands.
 		if u.OldPendingID != nil {
+			voidID := u.VoidTransferID
+			if voidID == (types.Uint128{}) {
+				voidID = RandomID()
+			}
 			tbTransfers = append(tbTransfers, types.Transfer{
-				ID:              RandomID(),
+				ID:              voidID,
 				PendingID:       UUIDToUint128(*u.OldPendingID),
 				DebitAccountID:  u.TenantQuotaID,
 				CreditAccountID: u.SinkID,

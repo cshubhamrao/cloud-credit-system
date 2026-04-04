@@ -384,3 +384,60 @@ func TestIntegration_LookupAccountBalances(t *testing.T) {
 	assert.Equal(t, uint64(0), balances["cpu_hours"].DebitsPosted)
 	assert.Equal(t, uint64(0), balances["cpu_hours"].DebitsPending)
 }
+
+// TestIntegration_DeterministicAllocationID_Idempotent verifies I-5: submitting the same
+// allocation transfer twice with the same deterministic ID is idempotent — TigerBeetle
+// returns TransferExists and the balance is not double-credited.
+//
+// This is the safety net for Temporal activity retries: if SubmitAllocationTransfers
+// commits to TB but the response is lost, the retry uses the same DeriveAllocationTransferID
+// output and TB accepts it without creating a duplicate credit.
+func TestIntegration_DeterministicAllocationID_Idempotent(t *testing.T) {
+	c := getTBClient(t)
+	defer c.Close()
+
+	globalIDs, err := ledger.CreateGlobalAccounts(c, nil)
+	require.NoError(t, err)
+
+	tenantUUID := ledger.Uint128ToBytes(ledger.RandomID())
+	tenantAccounts, err := ledger.CreateTenantQuotaAccounts(c, tenantUUID, nil)
+	require.NoError(t, err)
+
+	cpuResource := domain.ResourceCPUHours
+	opID := globalIDs[ledger.GlobalAccountKey{Resource: cpuResource, AccountType: domain.AccountTypeOperator}]
+	quotaID := tenantAccounts[cpuResource]
+
+	// Derive a deterministic ID (simulates what flushAdjustment does in the workflow).
+	seqNo := uint64(1)
+	transferID := ledger.DeriveAllocationTransferID(tenantUUID, seqNo, cpuResource.LedgerID())
+
+	mkAllocation := func() ledger.AllocationTransfer {
+		return ledger.AllocationTransfer{
+			Resource:      cpuResource,
+			OperatorID:    opID,
+			TenantQuotaID: quotaID,
+			Amount:        1000,
+			Code:          domain.CodeQuotaAllocation,
+			TenantUUID:    tenantUUID,
+			TransferID:    transferID,
+		}
+	}
+
+	// First submission — should be accepted.
+	results, err := ledger.SubmitAllocations(c, []ledger.AllocationTransfer{mkAllocation()})
+	require.NoError(t, err)
+	assert.True(t, results[0].Accepted, "first allocation should be accepted")
+	assert.False(t, results[0].Exists)
+
+	// Second submission — same ID, simulates Temporal activity retry.
+	results, err = ledger.SubmitAllocations(c, []ledger.AllocationTransfer{mkAllocation()})
+	require.NoError(t, err)
+	assert.True(t, results[0].Accepted, "duplicate allocation should be accepted (idempotent)")
+	assert.True(t, results[0].Exists, "duplicate allocation should return Exists=true (I-5)")
+
+	// Verify balance was credited exactly once.
+	balances, err := ledger.LookupBalances(c, map[string][16]byte{"cpu_hours": ledger.Uint128ToBytes(quotaID)})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1000), balances["cpu_hours"].CreditsPosted,
+		"credits must not be double-counted on activity retry")
+}

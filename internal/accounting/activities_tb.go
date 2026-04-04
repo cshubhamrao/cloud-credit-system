@@ -38,6 +38,13 @@ type TBBatchInput struct {
 	// Maps clusterID → resource_type → 16-byte pending transfer ID.
 	// Used to void the old pending before creating the new one.
 	PendingGaugeIDs map[string]map[string][16]byte
+	// NewGaugePendingIDs carries pre-generated deterministic IDs for the new pending
+	// transfer per (clusterID, resource_type). Generated in the workflow before the
+	// activity is scheduled so Temporal retries reuse the same IDs (I-5).
+	NewGaugePendingIDs map[string]map[string][16]byte
+	// GaugeVoidIDs carries pre-generated deterministic IDs for the void transfer
+	// per (clusterID, resource_type). Same idempotency rationale as NewGaugePendingIDs.
+	GaugeVoidIDs map[string]map[string][16]byte
 }
 
 // TBBatchResult is returned by SubmitTBBatch.
@@ -74,6 +81,11 @@ type SubmitAllocationInput struct {
 	GlobalOperatorIDs map[string][16]byte
 	Credits           map[string]int64
 	PeriodStartNs     int64
+	// TransferIDs carries pre-generated deterministic IDs keyed by resource_type.
+	// Generated in the workflow before the activity is scheduled so Temporal retries
+	// reuse the same IDs and TigerBeetle returns TransferExists instead of
+	// creating a duplicate credit (I-5). If nil, RandomID() fallback is used.
+	TransferIDs map[string][16]byte
 }
 
 func NewTBActivities(c *ledger.Client) *TBActivities {
@@ -182,7 +194,7 @@ func (a *TBActivities) SubmitTBBatch(ctx context.Context, input TBBatchInput) (T
 				}
 			}
 
-			gaugeUpdates = append(gaugeUpdates, ledger.GaugePendingUpdate{
+			gu := ledger.GaugePendingUpdate{
 				Resource:      r,
 				TenantQuotaID: ledger.UUIDToUint128(quotaBytes),
 				SinkID:        ledger.UUIDToUint128(sinkBytes),
@@ -190,7 +202,22 @@ func (a *TBActivities) SubmitTBBatch(ctx context.Context, input TBBatchInput) (T
 				NewAmount:     uint64(heartbeatAmount(hb, r)),
 				ClusterUUID:   hb.ClusterUUID,
 				HeartbeatTsNs: uint64(hb.HeartbeatTimestampNs),
-			})
+			}
+			if input.NewGaugePendingIDs != nil {
+				if clusterMap, ok := input.NewGaugePendingIDs[clusterID]; ok {
+					if idBytes, ok := clusterMap[string(r)]; ok {
+						gu.NewPendingID = ledger.UUIDToUint128(idBytes)
+					}
+				}
+			}
+			if input.GaugeVoidIDs != nil {
+				if clusterMap, ok := input.GaugeVoidIDs[clusterID]; ok {
+					if idBytes, ok := clusterMap[string(r)]; ok {
+						gu.VoidTransferID = ledger.UUIDToUint128(idBytes)
+					}
+				}
+			}
+			gaugeUpdates = append(gaugeUpdates, gu)
 			gaugeKeys = append(gaugeKeys, gaugeKey{clusterID, string(r)})
 		}
 	}
@@ -244,7 +271,7 @@ func (a *TBActivities) SubmitAllocationTransfers(ctx context.Context, input Subm
 		if !ok {
 			continue
 		}
-		allocations = append(allocations, ledger.AllocationTransfer{
+		t := ledger.AllocationTransfer{
 			Resource:      resource,
 			OperatorID:    ledger.UUIDToUint128(opBytes),
 			TenantQuotaID: ledger.UUIDToUint128(quotaBytes),
@@ -252,7 +279,13 @@ func (a *TBActivities) SubmitAllocationTransfers(ctx context.Context, input Subm
 			Code:          domain.CodeQuotaAllocation,
 			TenantUUID:    input.TenantUUID,
 			PeriodStartNs: uint64(input.PeriodStartNs),
-		})
+		}
+		if input.TransferIDs != nil {
+			if idBytes, ok := input.TransferIDs[r]; ok {
+				t.TransferID = ledger.UUIDToUint128(idBytes)
+			}
+		}
+		allocations = append(allocations, t)
 	}
 
 	if len(allocations) == 0 {

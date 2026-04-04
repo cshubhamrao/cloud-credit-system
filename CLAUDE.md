@@ -38,6 +38,7 @@ TenantAccountingWorkflow (Temporal, one per tenant)
 | I-2 | One heartbeat sequence processed at most once — `processedSeqs` in workflow + `DedupCache` in gateway |
 | I-3 | Hard limit correctness from TigerBeetle only — `debits_must_not_exceed_credits` flag |
 | I-4 | PostgreSQL snapshots are projections, may lag, never authoritative for enforcement |
+| I-5 | All TigerBeetle transfer IDs must be deterministic or pre-generated in workflow code — Temporal activities are at-least-once, so `RandomID()` inside an activity causes a duplicate transfer on retry |
 
 ---
 
@@ -188,11 +189,19 @@ make test-integration # requires docker-compose services running
 - **Ledger per resource type** — prevents cross-resource transfers at DB level
 - **Global operator + sink accounts** per ledger (shared across tenants)
 - **Tenant quota accounts** have `DebitsMustNotExceedCredits | History` flags
-- **Deterministic transfer IDs** for heartbeat usage records: `blake3(clusterID || seq || ledgerID)`
+- **Deterministic transfer IDs** for all TB transfers (invariant I-5) — IDs are derived via BLAKE3
+  with domain separators so Temporal activity retries reuse the same ID and TB returns `TransferExists`
+  instead of creating a duplicate:
+  - Usage records: `blake3("" || clusterID || seq || ledgerID)` via `DeriveTransferID` (unchanged)
+  - Allocation / adjustment: `blake3("alloc" || tenantUUID || FlushSeqNo || ledgerID)` via `DeriveAllocationTransferID`
+  - Gauge pending: `blake3("gauge-pending" || tenantUUID || FlushSeqNo || clusterUUID || ledgerID)`
+  - Gauge void: `blake3("gauge-void" || tenantUUID || FlushSeqNo || clusterUUID || ledgerID)`
+  - Provisioning allocations use `PeriodStartNs` cast to `uint64` as the sequence (unique per tenant lifecycle)
+  - `FlushSeqNo` is a monotonic counter in `TenantAccountingState`, incremented before each `flushBatch`
+    or `flushAdjustment` call and carried across Continue-As-New
   - BLAKE3 chosen intentionally: IDs double as idempotency guards against double-spending, so
     tamper resistance matters. Per [use_fast_data_algorithms](https://jolynch.github.io/posts/use_fast_data_algorithms/):
     use xxHash for pure speed/bitrot detection; use BLAKE3 when adversarial resistance is needed.
-- **Random (time-ordered) IDs** for allocation and adjustment transfers via `types.ID()` (TB-native)
 
 ### Account codes
 
@@ -265,6 +274,8 @@ reflection, matching the registration. Renaming the method is a compile error at
 | Missed-heartbeat timers | Skipped |
 | Gauge pending transfers | **Implemented**: void+create pending in one TB batch per flush; PendingGaugeIDs tracked in workflow state |
 | Adaptive flush interval | **Implemented**: 2s base, doubles to 60s when idle; immediate flush at batch size ≥ 150 |
+| Idempotent TB writes (I-5) | **Implemented**: all transfer IDs derived deterministically in workflow before activity dispatch; `RandomID()` eliminated from Temporal activity paths |
+| Gateway signal retry | **Implemented**: 3-attempt exponential backoff (100ms/500ms/2s) in signal dispatcher; 2s backpressure timeout on `sigCh` send; 3-attempt PG retry in `resolveTenantID` |
 | Soft limit alerts | Logged to stdout |
 
 ---

@@ -129,10 +129,16 @@ func (h *HeartbeatHandler) HeartbeatStream(
 	}()
 
 	// sigCh decouples receive from Temporal signaling.
-	// Buffer sized for ~2s of burst at max cluster rate (40 msg/s × 2s = 80).
+	// Buffer sized for ~6s of burst at max cluster rate (40 msg/s × 6s ≈ 256).
 	sigCh := make(chan *creditsystemv1.HeartbeatRequest, 256)
 
-	// Recv goroutine: read off the wire, dedup, enqueue — never blocks on Temporal.
+	// sigChTimeout is how long the recv goroutine waits for space in sigCh before
+	// dropping. A 2s window absorbs transient Temporal slowness without blocking
+	// the recv goroutine long enough to stall the bidi stream.
+	const sigChTimeout = 2 * time.Second
+
+	// Recv goroutine: read off the wire, dedup, enqueue — applies brief backpressure
+	// on Temporal slowness rather than silently dropping under load.
 	go func() {
 		defer close(sigCh)
 		for {
@@ -158,20 +164,46 @@ func (h *HeartbeatHandler) HeartbeatStream(
 				continue
 			}
 
+			// Use a timer (not time.After) to avoid a goroutine leak per dropped heartbeat
+			// when the channel is persistently full.
+			t := time.NewTimer(sigChTimeout)
 			select {
 			case sigCh <- req:
-			default:
-				h.log.Warn("signal channel full, dropping heartbeat", "cluster", clusterID, "seq", req.SequenceNumber)
+				if !t.Stop() {
+					<-t.C
+				}
+			case <-t.C:
+				h.log.Warn("signal channel full after timeout, dropping heartbeat",
+					"cluster", clusterID, "seq", req.SequenceNumber)
 			}
 		}
 	}()
 
-	// Signal dispatcher: drains sigCh and calls Temporal — one goroutine per stream.
+	// Signal dispatcher: drains sigCh, calls Temporal with exponential backoff retry.
+	// Dedup has already passed at this point — retries here are safe.
 	go func() {
+		backoffs := [...]time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second}
 		for req := range sigCh {
 			t0 := time.Now()
-			if err := h.signalHeartbeat(ctx, req); err != nil {
-				h.log.Error("signalHeartbeat error", "error", err, "cluster", clusterID)
+			var err error
+			for attempt := 0; attempt <= len(backoffs); attempt++ {
+				if attempt > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(backoffs[attempt-1]):
+					}
+					h.log.Warn("signalHeartbeat retry", "attempt", attempt,
+						"error", err, "cluster", clusterID, "seq", req.SequenceNumber)
+				}
+				err = h.signalHeartbeat(ctx, req)
+				if err == nil {
+					break
+				}
+			}
+			if err != nil {
+				h.log.Error("signalHeartbeat failed after retries",
+					"error", err, "cluster", clusterID, "seq", req.SequenceNumber)
 			}
 			h.recordLatency(time.Since(t0))
 		}
@@ -195,8 +227,9 @@ func (h *HeartbeatHandler) HeartbeatStream(
 				continue
 			}
 			resp := &creditsystemv1.HeartbeatResponse{
-				AckSequence: ack,
-				Quotas:      quotas,
+				AckSequence:     ack,
+				Quotas:          quotas,
+				PendingCommands: buildPendingCommands(quotas),
 			}
 			resp.Status = overallStatus(quotas)
 			if err := stream.Send(resp); err != nil {
@@ -232,8 +265,9 @@ func (h *HeartbeatHandler) Heartbeat(
 	}
 
 	resp := &creditsystemv1.HeartbeatResponse{
-		AckSequence: ack,
-		Quotas:      quotas,
+		AckSequence:     ack,
+		Quotas:          quotas,
+		PendingCommands: buildPendingCommands(quotas),
 	}
 	resp.Status = overallStatus(quotas)
 	return connect.NewResponse(resp), nil
@@ -335,7 +369,9 @@ func (h *HeartbeatHandler) queryWorkflowState(ctx context.Context, clusterID str
 }
 
 // resolveTenantID resolves a cluster ID string to its tenant ID string.
-// Results are cached in-memory after the first PG lookup.
+// Results are cached in-memory after the first PG lookup. Transient PG errors
+// are retried up to 3 times with a 200ms backoff so a brief PG restart does not
+// permanently lose heartbeats from uncached clusters.
 func (h *HeartbeatHandler) resolveTenantID(ctx context.Context, clusterID string) (string, error) {
 	if v, ok := h.clusterToTenant.Load(clusterID); ok {
 		return v.(string), nil
@@ -347,14 +383,29 @@ func (h *HeartbeatHandler) resolveTenantID(ctx context.Context, clusterID string
 	}
 
 	q := sqlcgen.New(h.db)
-	cluster, err := q.GetCluster(ctx, clusterUUID)
-	if err != nil {
-		return "", fmt.Errorf("GetCluster %s: %w", clusterID, err)
-	}
 
-	tenantID := cluster.TenantID.String()
-	h.clusterToTenant.Store(clusterID, tenantID)
-	return tenantID, nil
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		cluster, err := q.GetCluster(ctx, clusterUUID)
+		if err == nil {
+			tenantID := cluster.TenantID.String()
+			h.clusterToTenant.Store(clusterID, tenantID)
+			return tenantID, nil
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("GetCluster %s: %w", clusterID, err)
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("GetCluster %s: %w", clusterID, lastErr)
 }
 
 func uuidToBytes(id string) ([16]byte, error) {
@@ -381,4 +432,20 @@ func overallStatus(quotas []*creditsystemv1.QuotaInfo) creditsystemv1.Status {
 		return creditsystemv1.Status_STATUS_OK
 	}
 	return worst
+}
+
+// buildPendingCommands emits one TYPE_SHUTDOWN command per resource whose quota
+// is exceeded. The client (cluster agent) must stop sending heartbeats on receipt.
+// When credits are restored the commands disappear, signalling the client to resume.
+func buildPendingCommands(quotas []*creditsystemv1.QuotaInfo) []*creditsystemv1.Command {
+	var cmds []*creditsystemv1.Command
+	for _, q := range quotas {
+		if q.Status == creditsystemv1.Status_STATUS_QUOTA_EXCEEDED {
+			cmds = append(cmds, &creditsystemv1.Command{
+				Type:   creditsystemv1.Command_TYPE_SHUTDOWN,
+				Reason: fmt.Sprintf("quota exceeded: %s (available: %d)", q.ResourceType, q.Available),
+			})
+		}
+	}
+	return cmds
 }

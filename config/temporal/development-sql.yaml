@@ -10,6 +10,10 @@ frontend.enableUpdateWorkflowExecutionAsyncAccepted:
   - value: true
     constraints: {}
 
+frontend.workerHeartbeatsEnabled:
+  - value: true
+    constraints: {}
+
 # Delete closed workflow history and visibility records after retention expires
 worker.workflowExecutionScavengerEnabled:
   - value: true

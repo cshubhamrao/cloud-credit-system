@@ -289,11 +289,11 @@
           </label>
           <label data-field>
             CPU ms delta <span class="muted">expression</span>
-            <input type="text" id="sc-cpu" value="rand(10000, 60000)" required>
+            <input type="text" id="sc-cpu" value="nodes * rand(1000, 2000)" required>
           </label>
           <label data-field>
             Memory MB·s delta <span class="muted">expression</span>
-            <input type="text" id="sc-mem" value="rand(5000, 25000)" required>
+            <input type="text" id="sc-mem" value="nodes * rand(256, 512)" required>
           </label>
           <label data-field>
             Active nodes <span class="muted">expression</span>
@@ -305,11 +305,16 @@
 randInt(min, max) → random int in [min, max]
 seq               → current sequence number
 t                 → elapsed seconds since start
+nodes             → active node count (from nodes expression — evaluated first)
 
-Examples:
-  rand(100000, 300000)              burst / exhaustion test
-  t &lt; 30 ? rand(5e4,3e5) : 5000   spike then idle
-  seq % 5 === 0 ? 100000 : 10000   periodic burst</pre>
+Math: cpu_ms_delta = interval_ms × vCPUs_per_node × nodes × utilization
+      mem_mb_s_delta = (interval_ms / 1000) × mem_MB_per_node × nodes
+
+Examples (default 1000ms interval, ~2 vCPUs / 512 MB per node):
+  nodes * rand(1000, 2000)                 steady load  (~2 vCPUs at 50–100%)
+  nodes * rand(5000, 15000)                burst / exhaustion test
+  t &lt; 30 ? nodes * 1e4 : nodes * 1000     spike then idle
+  seq % 10 === 0 ? nodes * 1e4 : nodes * 1000  periodic burst</pre>
           </details>
           <footer class="hstack" style="margin-top:14px">
             <button type="submit">▶ Add &amp; Start</button>
@@ -524,11 +529,13 @@ const RESOURCE_LABELS = {
 const STALE_MS = 5 * 60 * 1000;
 
 // ── Expression evaluator ─────────────────────────────────────────────────────
-function evalExpr(expr, seq, t) {
+// nodes is pre-evaluated from nodesExpr and injected so cpu/mem exprs can scale by cluster size.
+function evalExpr(expr, seq, t, nodes) {
   const rand    = (a, b) => Math.random() * (b - a) + a;
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  nodes = (nodes != null) ? nodes : 1;
   // eslint-disable-next-line no-new-func
-  return new Function('rand', 'randInt', 'seq', 't', `return (${expr});`)(rand, randInt, seq, t);
+  return new Function('rand', 'randInt', 'seq', 't', 'nodes', `return (${expr});`)(rand, randInt, seq, t, nodes);
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -885,9 +892,10 @@ async function runHeartbeat(i) {
   const seq = (clusterSeq[sc.clusterId] = (clusterSeq[sc.clusterId] || 0) + 1);
   const t   = sc.startedAt ? (Date.now() - sc.startedAt) / 1000 : 0;
   try {
-    const cpu   = Math.max(0, Math.round(evalExpr(sc.cpuExpr,   seq, t)));
-    const mem   = Math.max(0, Math.round(evalExpr(sc.memExpr,   seq, t)));
-    const nodes = Math.max(0, Math.round(evalExpr(sc.nodesExpr, seq, t)));
+    // Evaluate nodes first so cpu/mem expressions can reference it via the `nodes` variable.
+    const nodes = Math.max(1, Math.round(evalExpr(sc.nodesExpr, seq, t)));
+    const cpu   = Math.max(0, Math.round(evalExpr(sc.cpuExpr,   seq, t, nodes)));
+    const mem   = Math.max(0, Math.round(evalExpr(sc.memExpr,   seq, t, nodes)));
 
     const resp = await hb('Heartbeat', {
       clusterId:            sc.clusterId,
@@ -903,6 +911,19 @@ async function runHeartbeat(i) {
     const status = (resp.status || '').replace('STATUS_', '');
     const lvl    = status.includes('EXCEEDED') ? 'err' : status.includes('WARNING') ? 'warn' : 'ok';
     log(`[${sc.name}] seq=${seq} cpu=${fmtNum(cpu,0)} mem=${fmtNum(mem,0)} nodes=${nodes} → ${status || 'OK'}`, lvl);
+
+    // Smart client: stop scenario immediately on TYPE_SHUTDOWN kill signal.
+    // The server sends this when quota is exceeded; it disappears when credits are restored.
+    if (resp.pendingCommands && resp.pendingCommands.length > 0) {
+      for (const cmd of resp.pendingCommands) {
+        if (cmd.type === 'TYPE_SHUTDOWN') {
+          log(`[${sc.name}] KILL SIGNAL — ${cmd.reason || 'quota exceeded'} — stopping scenario`, 'err');
+          stopScenario(i);
+          return;
+        }
+      }
+    }
+
     if (seq % 20 === 0) renderScenarios();
   } catch (e) {
     log(`[${sc.name}] seq=${seq} ERROR: ${e.message}`, 'err');
@@ -923,10 +944,10 @@ function buildScenario() {
     timer:     null,
     startedAt: null,
   };
-  // Validate expressions before accepting
-  try { evalExpr(sc.cpuExpr,   1, 0); } catch (e) { throw new Error(`CPU expr: ${e.message}`); }
-  try { evalExpr(sc.memExpr,   1, 0); } catch (e) { throw new Error(`Mem expr: ${e.message}`); }
-  try { evalExpr(sc.nodesExpr, 1, 0); } catch (e) { throw new Error(`Nodes expr: ${e.message}`); }
+  // Validate expressions before accepting (nodes=1 as placeholder for cpu/mem validation).
+  try { evalExpr(sc.nodesExpr, 1, 0);    } catch (e) { throw new Error(`Nodes expr: ${e.message}`); }
+  try { evalExpr(sc.cpuExpr,   1, 0, 1); } catch (e) { throw new Error(`CPU expr: ${e.message}`); }
+  try { evalExpr(sc.memExpr,   1, 0, 1); } catch (e) { throw new Error(`Mem expr: ${e.message}`); }
   return sc;
 }
 

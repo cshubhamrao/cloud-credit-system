@@ -94,9 +94,10 @@ type ClusterSim struct {
 	// recentSeqs holds the last few sent sequence numbers for replay.
 	recentSeqs []uint64
 
-	// killedResources tracks resources that received a hard limit response.
-	// The recv goroutine writes; the send loop reads. Key: resource type string.
-	killedResources sync.Map
+	// stopped is set true when the server sends a TYPE_SHUTDOWN kill command.
+	// The send loop skips the entire heartbeat while stopped.
+	// Cleared automatically when the server stops sending kill commands (credits restored).
+	stopped atomic.Bool
 }
 
 func newClusterSim(label string, tenantIdx int, tickInterval time.Duration, usageMult float64) *ClusterSim {
@@ -145,6 +146,7 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 
 	// Recv goroutine — parse real HeartbeatResponse from server.
 	go func() {
+		wasStopped := false
 		for {
 			resp, err := stream.Receive()
 			if err != nil {
@@ -172,17 +174,6 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 						status = "warning"
 					case creditsystemv1.Status_STATUS_QUOTA_EXCEEDED:
 						status = "exceeded"
-						// Simulate cluster acting on kill command: stop sending this resource.
-						if _, alreadyKilled := s.killedResources.Load(q.ResourceType); !alreadyKilled {
-							s.killedResources.Store(q.ResourceType, true)
-							tenant.recordRejected(d.program)
-							d.program.Send(eventMsg{
-								Timestamp: time.Now(),
-								TenantIdx: s.tenantIdx,
-								Kind:      EventHardLimit,
-								Message:   fmt.Sprintf("[%s] KILL — stopping %s usage (hard limit hit)", s.label, q.ResourceType),
-							})
-						}
 					}
 					quotas = append(quotas, QuotaState{
 						Resource:  q.ResourceType,
@@ -194,6 +185,37 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 					})
 				}
 				d.program.Send(quotaUpdateMsg{TenantIdx: s.tenantIdx, Quotas: quotas})
+			}
+
+			// Smart-client kill signal: server sends TYPE_SHUTDOWN commands when quota
+			// is exceeded. Stop all heartbeats while the signal is active; auto-resume
+			// when the server stops sending it (credits restored).
+			hasKill := false
+			for _, cmd := range resp.PendingCommands {
+				if cmd.Type == creditsystemv1.Command_TYPE_SHUTDOWN {
+					hasKill = true
+					break
+				}
+			}
+			if hasKill && !wasStopped {
+				wasStopped = true
+				s.stopped.Store(true)
+				tenant.recordRejected(d.program)
+				d.program.Send(eventMsg{
+					Timestamp: time.Now(),
+					TenantIdx: s.tenantIdx,
+					Kind:      EventHardLimit,
+					Message:   fmt.Sprintf("[%s] KILL SIGNAL — stopping all heartbeats (hard limit hit)", s.label),
+				})
+			} else if !hasKill && wasStopped {
+				wasStopped = false
+				s.stopped.Store(false)
+				d.program.Send(eventMsg{
+					Timestamp: time.Now(),
+					TenantIdx: s.tenantIdx,
+					Kind:      EventInfo,
+					Message:   fmt.Sprintf("[%s] RESUMED — quota restored, heartbeats resuming", s.label),
+				})
 			}
 
 			// Log ACK in event log.
@@ -247,6 +269,10 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 			if d.paused.Load() {
 				continue
 			}
+			// Smart client: server issued a kill signal — hold heartbeats until resumed.
+			if s.stopped.Load() {
+				continue
+			}
 			seq++
 
 			// Track recent seqs for idempotency replay.
@@ -255,32 +281,33 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 				s.recentSeqs = s.recentSeqs[len(s.recentSeqs)-10:]
 			}
 
-			baseCPU := int64(rand.N(50_000) + 10_000)
-			baseMem := int64(rand.N(20_000) + 5_000)
+			tickMs := int64(s.tickInterval / time.Millisecond)
 
-			cpuDelta := int64(float64(baseCPU) * s.usageMult)
-			memDelta := int64(float64(baseMem) * s.usageMult)
-			nodes := int32(rand.N(4) + 2) // normal: 2–5 nodes
+			// Active nodes (gauge): current point-in-time count.
+			nodes := int32(rand.N(4) + 2) // 2–5 nodes at normal load
 
 			if exhaust {
-				// Ramp up dramatically to hit hard limits on all resources.
-				// CPU: burst to ~5–10× normal to exhaust cumulative quota fast.
-				cpuDelta = int64(rand.N(200_000) + 100_000)
-				// Nodes: attempt to scale out far beyond per-tenant limit (20 for Acme).
-				// Combined with the pending from other clusters this will exceed the cap
-				// and TigerBeetle will reject the pending transfer (ExceedsCredits).
+				// Attempt to scale far beyond the per-tenant node limit (20 for Acme).
+				// TigerBeetle will reject the pending gauge transfer (ExceedsCredits).
 				nodes = int32(rand.N(5) + 18) // 18–22 — exceeds limit on its own
 			}
 
-			// Simulate kill command: zero out resources that hit hard limit.
-			if _, killed := s.killedResources.Load("cpu_hours"); killed {
-				cpuDelta = 0
-			}
-			if _, killed := s.killedResources.Load("memory_gb_hours"); killed {
-				memDelta = 0
-			}
-			if _, killed := s.killedResources.Load("active_nodes"); killed {
-				nodes = 0
+			// cpu_milliseconds_delta = elapsed_ms × vCPUs_per_node × nodes × utilization.
+			// 2 vCPUs per node at 50–90% utilisation represents a realistic cloud instance.
+			// usageMult scales relative workload intensity across clusters.
+			const vCPUsPerNode = 2
+			util     := 0.5 + rand.Float64()*0.4 // 50–90% CPU utilisation
+			cpuDelta := int64(float64(tickMs) * vCPUsPerNode * float64(nodes) * util * s.usageMult)
+
+			// memory_mb_seconds_delta = elapsed_s × mem_MB_per_node × nodes.
+			// 512 MB per node (0.5 GB); multiply by nodes so memory scales with cluster size.
+			const memMBPerNode = 512
+			memDelta := int64(float64(tickMs) / 1000.0 * memMBPerNode * float64(nodes) * s.usageMult)
+
+			if exhaust {
+				// Peg all CPUs at burst capacity (~8× normal vCPU load) to rapidly
+				// exhaust the cumulative CPU quota.
+				cpuDelta = int64(float64(tickMs) * vCPUsPerNode * 8 * float64(nodes) * s.usageMult)
 			}
 
 			err := stream.Send(&creditsystemv1.HeartbeatRequest{
@@ -295,7 +322,8 @@ func (s *ClusterSim) run(d *ScenarioDriver) {
 				slog.Warn("stream send error", "cluster", s.label, "error", err)
 				return
 			}
-			slog.Debug("heartbeat sent", "cluster", s.label, "seq", seq, "cpu", cpuDelta, "exhaust", exhaust)
+			slog.Debug("heartbeat sent", "cluster", s.label, "seq", seq,
+				"tickMs", tickMs, "nodes", nodes, "cpu", cpuDelta, "mem", memDelta, "exhaust", exhaust)
 		}
 	}
 }
@@ -539,12 +567,9 @@ func (d *ScenarioDriver) stepStartClusters(ctx context.Context) tea.Msg {
 }
 
 func (d *ScenarioDriver) stepExhaust() tea.Msg {
-	// Clear previous kills so clusters resume sending all resources before ramping.
+	// Clear any previous kill-stop so clusters are live before ramping.
 	for _, sim := range d.tenants[0].clusters {
-		sim.killedResources.Range(func(k, _ any) bool {
-			sim.killedResources.Delete(k)
-			return true
-		})
+		sim.stopped.Store(false)
 	}
 	// Signal Cluster A (Acme's first cluster) to ramp up usage aggressively.
 	close(d.tenants[0].clusters[0].exhaustCh)
@@ -563,12 +588,12 @@ func (d *ScenarioDriver) stepSurgePack(ctx context.Context) tea.Msg {
 		Amount:       500_000,
 		Reason:       "Emergency surge pack",
 	}))
-	msg := "Surge pack applied — CPU wallet +500K credits"
+	msg := "Surge pack applied — CPU wallet +500K credits; clusters will auto-resume"
 	if err != nil {
 		msg = fmt.Sprintf("Surge pack error: %v", err)
 	}
-	// Unblock CPU on Acme's Cluster A — credits restored, cluster resumes sending.
-	d.tenants[0].clusters[0].killedResources.Delete("cpu_hours")
+	// No explicit unblock needed: the server stops sending TYPE_SHUTDOWN once
+	// ExceededResources is cleared, and the recv goroutine auto-resumes the cluster.
 	return eventMsg{Timestamp: time.Now(), TenantIdx: 0, Kind: EventSurgePack, Message: msg}
 }
 
