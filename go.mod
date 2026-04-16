@@ -15,7 +15,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.5
+	github.com/jackc/pgx/v5 v5.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tigerbeetle/tigerbeetle-go v0.16.78
